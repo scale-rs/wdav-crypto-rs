@@ -1,0 +1,13 @@
+[package]
+name = "wdav"
+version = "0.1.0"
+edition = "2021"
+description = "Quick start a webdav server"
+license = "MIT"
+repository = "https://github.com/niuhuan/wdav-rs"
+
+[dependencies]
+dav-server = { version = "0.5.3", features = ["warp-compat"] }
+env_logger = "0.10.0"
+tokio = { version = "1.26.0", features = ["full"] }
+warp = "0.3.3"
