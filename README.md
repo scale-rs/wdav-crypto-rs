@@ -1,16 +1,15 @@
 WDAV
 ====
 
-Quick start a wdav server
+Quick start a webdav server
 
 # 📦️ Install
 
 ```shell
 cargo install wdav
 ```
-# 📙 Examples
 
-## 🌐 Start a webdav server
+# 🌐 Start a webdav server
 
 ```shell
 wdav.exe
@@ -20,7 +19,7 @@ current dir : D:\Developments\Projects\wdav
 listening on 0.0.0.0:8080 serving .
 ```
 
-## 🦮 Print help
+# 🦮 Print help
 
 ```shell
 wdav.exe
