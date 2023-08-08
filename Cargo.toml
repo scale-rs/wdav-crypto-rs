@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2021"
 description = "Quick start a webdav server"
 license = "MIT"
-repository = "https://github.com/niuhuan/wdav-rs"
+repository = "https://github.com/peter-kehl/wdav-rs"
 
 [dependencies]
 clap = { version = "4.2.1", features = ["derive"] }
