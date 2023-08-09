@@ -1,13 +1,13 @@
 [package]
-name = "wdav"
-version = "0.1.1"
+name = "tmp-wdav-deta-space"
+version = "0.0.1"
 edition = "2021"
-description = "Quick start a webdav server"
+description = "Temporary (non-persistent) WebDAV server"
 license = "MIT"
-repository = "https://github.com/peter-kehl/wdav-rs"
+repository = "https://github.com/scale-rs/tmpwdav-1-q0047082.deta.app"
+# homepage = "" Deta Discovery
 
 [dependencies]
-clap = { version = "4.2.1", features = ["derive"] }
 dav-server = { version = "0.5.3", features = ["warp-compat"] }
 env_logger = "0.10.0"
 tokio = { version = "1.26.0", features = ["full"] }

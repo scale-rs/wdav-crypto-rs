@@ -1,0 +1,17 @@
+# Spacefile Docs: https://go.deta.dev/docs/spacefile/v0
+v: 0
+micros:
+  - name: main  
+    primary: true
+    public: true
+    src: .
+    engine: custom
+    dev: cargo run
+    commands:
+      - rustup target add x86_64-unknown-linux-musl
+      - cargo build --release --target=x86_64-unknown-linux-musl
+    run: target/x86_64-unknown-linux-musl/release/tmp-wdav-deta-space
+    include:
+      - target/x86_64-unknown-linux-musl/release/tmp-wdav-deta-space
+    include:
+      - target/release/tmp-wdav-deta-space

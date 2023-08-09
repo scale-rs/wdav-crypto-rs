@@ -1,0 +1,14 @@
+# Spacefile Docs: https://go.deta.dev/docs/spacefile/v0
+v: 0
+micros:
+  - name: main  
+    primary: true
+    public: true
+    src: .
+    engine: custom
+    dev: cargo run
+    commands:
+      - cargo build --release
+    run: target/release/tmp-wdav-deta-space
+    include:
+      - target/release/tmp-wdav-deta-space
