@@ -5,7 +5,7 @@ edition = "2021"
 description = "Temporary (non-persistent) WebDAV server"
 license = "MIT"
 repository = "https://github.com/scale-rs/tmpwdav-1-q0047082.deta.app"
-# homepage = "" Deta Discovery
+homepage = "https://tmpwdav-1-q0047082.deta.app"
 
 [dependencies]
 dav-server = { version = "0.5.3", features = ["warp-compat"] }
