@@ -1,12 +1,15 @@
-#![allow(unused)]
+//#![allow(unused)]
+use const_format::formatcp;
 use dav_server::{
     fakels::FakeLs, localfs::LocalFs, DavConfig, DavHandler, DavMethod, DavMethodSet,
 };
+use std::fmt::Debug;
 use std::net::{IpAddr, SocketAddr};
-use std::{env, fs, io};
-use warp::Filter;
+use std::{env, fs, io, path::Path};
+use warp::http::{self, HeaderValue, StatusCode};
+use warp::{reject, reject::Reject, reject::Rejection, Filter, Reply};
 
-/// Environment variable name that containsthe port number assigned by Deta.Space.
+/// Environment variable name that contains the port number assigned by Deta.Space.
 const ENV_PORT: &'static str = "PORT";
 const DEFAULT_PORT: &'static str = "8080";
 
@@ -24,19 +27,26 @@ const ENV_SALT: &'static str = "SALT";
 // const TMP: &'static str = "/tmp"; // @TODO add if we use `const_format`
 const DIRS: &'static str = "/tmp/wdav_dirs";
 
+// Leading URL "segments" (top level directories). Warp requires them NOT to contain any slash.
+const READ: &'static str = "read";
+const WRITE: &'static str = "write";
+const ADMIN: &'static str = "admin";
+const ADD: &'static str = "add";
+
 // Directories containing symlinks. These constants could use `const_format` crate. But that
 // involves quote + syn = long build times. TODO reconsider because of Tokio, or don't use Tokio
 // attrib. macro.
 const SYMLINKS: &'static str = "/tmp/wdav_symlinks";
-const SYMLINKS_WRITE: &'static str = "/tmp/wdav_symlinks/write";
-const SYMLINKS_READ: &'static str = "/tmp/wdav_symlinks/read";
+const SYMLINKS_WRITE: &'static str = formatcp!("{SYMLINKS}/{WRITE}");
+const SYMLINKS_READ: &'static str = formatcp!("{SYMLINKS}/{READ}");
+
 const CLEANUP_IN_PROGRESS: &'static str = "/tmp/wdav_symlinks/CLEANUP_IN_PROGRESS";
 
-// Leading URL "segments" (top level directories). Warp requires them NOT to contain any slash.
-const READ: &'static str = "read";
-const WRITE: &'static str = "write";
-
-fn dav_config(prefix_segment: impl core::fmt::Display, methods: DavMethodSet) -> DavConfig {
+fn dav_config(
+    prefix_segment: impl core::fmt::Display,
+    dir_path: impl AsRef<Path>,
+    methods: DavMethodSet,
+) -> DavConfig {
     // No symlinks by default. The following disables symlinks:
     //
     //let warp_dav = dav_server::warp::dav_dir(base, true, true);
@@ -49,7 +59,7 @@ fn dav_config(prefix_segment: impl core::fmt::Display, methods: DavMethodSet) ->
     //
     // In GNOME open the WebDAV directory with: nautilus dav://127.0.0.1:4201/subdir-here
     DavHandler::builder()
-        .filesystem(LocalFs::new(SYMLINKS_READ, false, false, false))
+        .filesystem(LocalFs::new(dir_path, false, false, false))
         //--- @TODO SYMLINKS_READ to a param
         .locksystem(FakeLs::new())
         .autoindex(true) //@TODO
@@ -57,6 +67,48 @@ fn dav_config(prefix_segment: impl core::fmt::Display, methods: DavMethodSet) ->
         .methods(methods)
         //.strip_prefix("/".to_owned() + prefix_segment)
         .strip_prefix(format!("/{}", prefix_segment))
+}
+
+#[derive(Debug)]
+struct Rej<T>(T)
+where
+    T: Debug + Sized + Send + Sync;
+
+unsafe impl<T> Send for Rej<T> where T: Debug + Sized + Send + Sync {}
+
+unsafe impl<T> Sync for Rej<T> where T: Debug + Sized + Send + Sync {}
+
+impl<T> Reject for Rej<T> where T: Debug + Sized + Send + Sync + 'static {}
+
+fn redirect_see_other<L>(location: L) -> impl Reply
+where
+    HeaderValue: TryFrom<L>,
+    <HeaderValue as TryFrom<L>>::Error: Into<http::Error>,
+{
+    warp::reply::with_status(
+        warp::reply::with_header(warp::reply(), "Location:", location),
+        StatusCode::SEE_OTHER,
+    )
+}
+
+async fn admin_list() -> Result<impl Reply, Rejection> {
+    Ok("TODO")
+}
+
+async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection> {
+    let dir_result = fs::create_dir(format!("{DIRS}/{dir_name}"));
+    if let Err(e) = dir_result {
+        return Err(reject::custom(Rej(e)));
+    }
+    Ok(redirect_see_other(format!("/{ADMIN}")))
+}
+
+async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
+    let dir_result = fs::create_dir(format!("{DIRS}/{dir_name}"));
+    if let Err(e) = dir_result {
+        return Err(reject::custom(Rej(e)));
+    }
+    Ok(redirect_see_other(format!("/{ADMIN}")))
 }
 
 #[tokio::main]
@@ -81,12 +133,12 @@ async fn main() -> io::Result<()> {
         let mut read_only = DavMethodSet::HTTP_RO;
         read_only.add(DavMethod::PropFind);
 
-        let dav_handler = dav_config(READ, read_only).build_handler();
+        let dav_handler = dav_config(READ, SYMLINKS_READ, read_only).build_handler();
         dav_server::warp::dav_handler(dav_handler)
     };
 
     let dav_write_filter = {
-        // The following is redundant, but it's currently the portable/correct way.
+        // The following is impractical/redundant, but it's currently the only portable/correct way.
         let mut read_write = DavMethodSet::WEBDAV_RW;
         // Based on source of DavMethodSet::HTTP_RW:
         read_write.add(DavMethod::Get);
@@ -94,16 +146,27 @@ async fn main() -> io::Result<()> {
         read_write.add(DavMethod::Options);
         read_write.add(DavMethod::Put);
 
-        let dav_handler = dav_config(WRITE, read_write).build_handler();
+        let dav_handler = dav_config(WRITE, SYMLINKS_WRITE, read_write).build_handler();
         dav_server::warp::dav_handler(dav_handler)
     };
 
-    let admin = warp::path!("admin").map(|| "/admin");
-    let admin_more = warp::path!("admin" / ..).map(|| "/admin/*");
+    let admin_list = warp::path(ADMIN)
+        .and(warp::path::end())
+        .and_then(admin_list);
+
+    // HTTP POST with URL parameters is unusual, but easy to handle & test
+    let admin_add = warp::post().and(
+        /*warp::path!("admin" / "add" / String)*/
+        warp::path("admin")
+            .and(warp::path("add"))
+            .and(warp::path::param::<String>())
+            .and(warp::path::end())
+            .and_then(admin_add),
+    );
 
     let routes = warp::any().and(
-        admin
-            .or(admin_more)
+        admin_list
+            .or(admin_add)
             .or(warp::path(READ).and(dav_read_filter))
             .or(warp::path(WRITE).and(dav_write_filter)),
     );

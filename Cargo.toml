@@ -12,3 +12,4 @@ dav-server = { version = "0.5.3", features = ["warp-compat"] }
 env_logger = "0.10.0"
 tokio = { version = "1.26.0", features = ["full"] }
 warp = "0.3.3"
+const_format = "0.2.31"
