@@ -1,7 +1,10 @@
 <!-- markdownlint-disable MD025 -->
-# WDAV
+# Temporary WebDav server
 
-Quick start a WebDAV server.
+Quick start a WebDAV server. Deployable on [Deta.Space](https://deta.space/docs).
+
+When accessing directory URLs under non-WebDAV (classic) HTTP, and if the directory contains
+`index.html`, this returns it. That serves for previewing demos/snippets of static HTML websites.
 
 Based on [niuhuan/wdav-rs](https://github.com/niuhuan/wdav-rs).
 
