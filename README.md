@@ -3,89 +3,23 @@
 
 Quick start a WebDAV server. Deployable on [Deta.Space](https://deta.space/docs).
 
-When accessing directory URLs under non-WebDAV (classic) HTTP, and if the directory contains
-`index.html`, this returns it. That serves for previewing demos/snippets of static HTML websites.
+Based on [niuhuan/wdav-rs](https://github.com/niuhuan/wdav-rs) (which, on its own, is NOT deployable on Deta.Space).
 
-Based on [niuhuan/wdav-rs](https://github.com/niuhuan/wdav-rs).
-
-# 📦️ Install
-
-```shell
-cargo build
-```
-
-or
-
-```shell
-cargo build --release
-```
-
-or use `cargo run` as per below.
-
-# 🌐 Start a webdav server
-
-If you did build, then
-
-```shell
-target/debug/wdav
-```
-
-or
-
-```shell
-target/release/wdav
-```
-
-or
-
-```shell
-cargo run
-```
-
-```text
-current dir : D:\Developments\Projects\wdav
-listening on 0.0.0.0:8080 serving .
-```
-
-# 🦮 Print help
-
-```shell
-target/debug/wdav --help
-```
-
-or
-
-```shell
-target/release/wdav --help
-```
-
-or
-
-```shell
-cargo run -- --help
-```
-
-```text
-Quick start a webdav server
-
-Usage: wdav [OPTIONS]
-
-Options:
-  -f, --folder <FOLDER>    Attach to webdav root [default: .]
-  -a, --address <ADDRESS>  Address of listen [default: 0.0.0.0]
-  -p, --port <PORT>        Port of listen [default: 8080]
-  -h, --help               Print help
-```
+# Installation, local run and deployment
 
 # 🔐 Security
 
-Currently wdav does not support user authentication.
+Anyone with a write hash can can upload files and, by doing so, can fill up `/tmp` partition,
+potentially make the website unusable (and prevent others from uploading any files). If you remove
+the folder for a (previously) generated write hash, no one can upload files through that hash
+anymore.
 
-Either have that port denied by firewall, or ensure that you don't accidentally connect to a public
-network.
+# No Index.html, nor autoindexing for now
 
-Otherwise anyone on the same network can upload files and (in the better case) make your local user
-hit its quota, or (in the worse case) fill up that partition.
+Even though `da-server` has API to enable/disable autoindexing and/or serving `index.html` (or
+similar), it seems not to be working. To be investigated.
+<!-- When accessing directory URLs under non-WebDAV (classic) HTTP, and if the directory contains
+`index.html`, this returns it. That serves for previewing demos/snippets of static HTML websites.-->
 
 # 🔗 Connecting with a client
 

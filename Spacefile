@@ -4,7 +4,9 @@ micros:
   - name: main  
     primary: true
     # TODO: Make only /write and /read public
-    public: true
+    public_routes:
+      - "/read/*"
+      - "/write/*"
     src: .
     engine: custom
     dev: cargo run
@@ -14,6 +16,8 @@ micros:
     run: target/x86_64-unknown-linux-musl/release/tmp-wdav-deta-space
     include:
       - target/x86_64-unknown-linux-musl/release/tmp-wdav-deta-space
-# TODO Non-empty salt, with default. Why? So that if we share both a public read-only URL and
-# private/restricted read-write URL (hash), recipients cant't brute-force our Deta.Space private
-# key.
+    presets:
+      env:
+        - name: SALT
+          description: Crypto salt for write hashes. Required; with no default.
+
