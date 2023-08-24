@@ -80,15 +80,15 @@ unsafe impl<T> Sync for Rej<T> where T: Debug + Sized + Send + Sync {}
 
 impl<T> Reject for Rej<T> where T: Debug + Sized + Send + Sync + 'static {}
 
-fn redirect_see_other<L>(location: L) -> impl Reply
+fn redirect_see_other<L>(location: L) -> Result<impl Reply, Rejection>
 where
     HeaderValue: TryFrom<L>,
     <HeaderValue as TryFrom<L>>::Error: Into<http::Error>,
 {
-    warp::reply::with_status(
+    Ok(warp::reply::with_status(
         warp::reply::with_header(warp::reply(), "Location:", location),
         StatusCode::SEE_OTHER,
-    )
+    ))
 }
 
 async fn admin_list() -> Result<impl Reply, Rejection> {
@@ -100,7 +100,7 @@ async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection> {
     if let Err(e) = dir_result {
         return Err(reject::custom(Rej(e)));
     }
-    Ok(redirect_see_other(format!("/{ADMIN}")))
+    redirect_see_other(format!("/{ADMIN}"))
 }
 
 async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
@@ -108,7 +108,7 @@ async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
     if let Err(e) = dir_result {
         return Err(reject::custom(Rej(e)));
     }
-    Ok(redirect_see_other(format!("/{ADMIN}")))
+    redirect_see_other(format!("/{ADMIN}"))
 }
 
 #[tokio::main]
