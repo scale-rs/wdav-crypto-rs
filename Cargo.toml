@@ -8,8 +8,10 @@ repository = "https://github.com/scale-rs/tmpwdav-1-q0047082.deta.app"
 homepage = "https://tmpwdav-1-q0047082.deta.app"
 
 [dependencies]
+askama = "0.12.0"
+const_format = "0.2.31"
 dav-server = { version = "0.5.3", features = ["warp-compat"] }
 env_logger = "0.10.0"
 tokio = { version = "1.26.0", features = ["full"] }
 warp = "0.3.3"
-const_format = "0.2.31"
+http = "0.2.5"

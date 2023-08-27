@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <script type="text/javascript">
+      function on_submit_add() {
+        var form = document.getElementById("add_form");
+        var dir_name = document.getElementById('dir_name');
+        form.action+= escape(dir_name.value);
+      }
+    </script>
+  </head>
+  <body>
+    <p>
+    {% if !dirs.is_empty() %}
+    Existing directories:
+    {% for dir in dirs %}
+        
+    {% endfor %}
+    {% else %}
+    No directories published.
+    {% endif %}
+    </p>
+    <p>
+      Create a new directory
+      <form method="post" id="add_form" action="/admin/add/" accept-charset="UTF-8" onsubmit="on_submit_add(); true">
+        <input type="text" name="dir_name" id="dir_name"/>
+        <input type="submit" value="create"/>
+      </form>
+    </p>
+  </body>
+</html>

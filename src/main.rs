@@ -1,13 +1,15 @@
-//#![allow(unused)]
+use askama::Template;
 use const_format::formatcp;
 use dav_server::{
     fakels::FakeLs, localfs::LocalFs, DavConfig, DavHandler, DavMethod, DavMethodSet,
 };
+use http::uri::Uri;
 use std::fmt::Debug;
+use std::fs::{self, DirEntry, ReadDir};
 use std::net::{IpAddr, SocketAddr};
-use std::{env, fs, io, path::Path};
+use std::{env, io, path::Path};
 use warp::http::{self, HeaderValue, StatusCode};
-use warp::{reject, reject::Reject, reject::Rejection, Filter, Reply};
+use warp::{redirect, reject, reject::Reject, reject::Rejection, reply, Filter, Reply};
 
 /// Environment variable name that contains the port number assigned by Deta.Space.
 const ENV_PORT: &'static str = "PORT";
@@ -40,7 +42,7 @@ const SYMLINKS: &'static str = "/tmp/wdav_symlinks";
 const SYMLINKS_WRITE: &'static str = formatcp!("{SYMLINKS}/{WRITE}");
 const SYMLINKS_READ: &'static str = formatcp!("{SYMLINKS}/{READ}");
 
-const CLEANUP_IN_PROGRESS: &'static str = "/tmp/wdav_symlinks/CLEANUP_IN_PROGRESS";
+const CLEANUP_IN_PROGRESS: &'static str = formatcp!("{SYMLINKS}/CLEANUP_IN_PROGRESS");
 
 fn dav_config(
     prefix_segment: impl core::fmt::Display,
@@ -75,9 +77,7 @@ where
     T: Debug + Sized + Send + Sync;
 
 unsafe impl<T> Send for Rej<T> where T: Debug + Sized + Send + Sync {}
-
 unsafe impl<T> Sync for Rej<T> where T: Debug + Sized + Send + Sync {}
-
 impl<T> Reject for Rej<T> where T: Debug + Sized + Send + Sync + 'static {}
 
 fn redirect_see_other<L>(location: L) -> Result<impl Reply, Rejection>
@@ -85,14 +85,44 @@ where
     HeaderValue: TryFrom<L>,
     <HeaderValue as TryFrom<L>>::Error: Into<http::Error>,
 {
+    // Content-type', 'text/html')
+    //warp::reply::with::headers(headers)
     Ok(warp::reply::with_status(
         warp::reply::with_header(warp::reply(), "Location:", location),
         StatusCode::SEE_OTHER,
     ))
+    /*
+    Ok(warp::reply::with_header(
+        warp::reply::with_status(warp::reply(), StatusCode::SEE_OTHER),
+        "Location:",
+        location,
+    ))
+    */
 }
 
-async fn admin_list() -> Result<impl Reply, Rejection> {
-    Ok("TODO")
+#[derive(Template)]
+#[template(path = "admin_list.html")]
+struct AdminListTemplate {
+    dirs: Vec<DirEntry>,
+}
+
+// Thanks to https://blog.logrocket.com/template-rendering-in-rust
+type WebResult<T> = std::result::Result<T, Rejection>;
+
+async fn admin_list() -> WebResult<impl Reply> {
+    let dirs = fs::read_dir(DIRS).map_err(|e| reject::custom(Rej(e)))?;
+
+    let mut dirs_vec = Vec::<DirEntry>::new();
+    for entry in dirs {
+        match entry {
+            Ok(dir) => dirs_vec.push(dir),
+            Err(err) => return Err(reject::custom(Rej(err))),
+        }
+    }
+
+    let template = AdminListTemplate { dirs: dirs_vec };
+    let res = template.render().map_err(|e| reject::custom(Rej(e)))?;
+    Ok(reply::html(res))
 }
 
 async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection> {
@@ -100,7 +130,10 @@ async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection> {
     if let Err(e) = dir_result {
         return Err(reject::custom(Rej(e)));
     }
-    redirect_see_other(format!("/{ADMIN}"))
+    //redirect_see_other(format!("/{ADMIN}"))
+    Ok(redirect::see_other(
+        format!("/{ADMIN}").parse::<Uri>().expect("Admin UR"),
+    ))
 }
 
 async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
@@ -155,14 +188,10 @@ async fn main() -> io::Result<()> {
         .and_then(admin_list);
 
     // HTTP POST with URL parameters is unusual, but easy to handle & test
-    let admin_add = warp::post().and(
-        /*warp::path!("admin" / "add" / String)*/
-        warp::path("admin")
-            .and(warp::path("add"))
-            .and(warp::path::param::<String>())
-            .and(warp::path::end())
-            .and_then(admin_add),
-    );
+    let admin_add = warp::post()
+        .and(warp::body::content_length_limit(1024 * 16))
+        .and(warp::path!("admin" / "add" / String))
+        .and_then(admin_add);
 
     let routes = warp::any().and(
         admin_list
