@@ -15,8 +15,8 @@
     {% if !entries.is_empty() %}
       Existing directories:
       <table>
-      {% for entry in entries %}
-          {{ entry.read_name() }}
+      {% for (name, entry) in entries %}
+          {{ name }}
       {% endfor %}
       </table>
     {% else %}

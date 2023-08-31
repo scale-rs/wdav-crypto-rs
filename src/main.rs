@@ -7,6 +7,7 @@ use dav_server::{
     fakels::FakeLs, localfs::LocalFs, DavConfig, DavHandler, DavMethod, DavMethodSet,
 };
 use http::uri::Uri;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self, DirEntry};
 use std::net::{IpAddr, SocketAddr};
@@ -156,10 +157,11 @@ impl Default for Entry {
     }
 }
 
+/// Directory entries, mapped by their (potentially lossy) names.
 #[derive(Template)]
 #[template(path = "admin_list.html")]
 struct AdminListTemplate {
-    entries: Vec<Entry>,
+    entries: HashMap<String, Entry>,
 }
 
 // Thanks to https://blog.logrocket.com/template-rendering-in-rust
@@ -168,10 +170,13 @@ type WebResult<T> = std::result::Result<T, Rejection>;
 async fn admin_list() -> WebResult<impl Reply> {
     let dirs = fs::read_dir(DIRS).map_err(|e| reject::custom(Rej(e)))?;
 
-    let mut dirs_vec = Vec::<Entry>::new();
-    for entry in dirs {
-        match entry {
-            Ok(dir_entry) => dirs_vec.push(Entry::new_dir(dir_entry)),
+    let mut entries = HashMap::<String, Entry>::new();
+    for dir_entry in dirs {
+        match dir_entry {
+            Ok(entry) => {
+                let entry = Entry::new_dir(entry);
+                entries.insert(entry.read_name().to_owned(), entry);
+            }
             Err(err) => return Err(reject::custom(Rej(err))),
         }
     }
@@ -192,7 +197,7 @@ async fn admin_list() -> WebResult<impl Reply> {
         }
     }
 
-    let template = AdminListTemplate { entries: dirs_vec };
+    let template = AdminListTemplate { entries };
     let res = template.render().map_err(|e| reject::custom(Rej(e)))?;
     Ok(reply::html(res))
 }
