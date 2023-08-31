@@ -12,13 +12,15 @@
   </head>
   <body>
     <p>
-    {% if !dirs.is_empty() %}
-    Existing directories:
-    {% for dir in dirs %}
-        
-    {% endfor %}
+    {% if !entries.is_empty() %}
+      Existing directories:
+      <table>
+      {% for entry in entries %}
+          {{ entry.read_name() }}
+      {% endfor %}
+      </table>
     {% else %}
-    No directories published.
+      No directories published.
     {% endif %}
     </p>
     <p>

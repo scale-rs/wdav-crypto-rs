@@ -1,11 +1,14 @@
 use askama::Template;
+/// This does use Syn + Parse crate, which increase build times. But Askama's attribute (procedural)
+/// macro uses those anyway.
 use const_format::formatcp;
+use core::panic;
 use dav_server::{
     fakels::FakeLs, localfs::LocalFs, DavConfig, DavHandler, DavMethod, DavMethodSet,
 };
 use http::uri::Uri;
 use std::fmt::Debug;
-use std::fs::{self, DirEntry, ReadDir};
+use std::fs::{self, DirEntry};
 use std::net::{IpAddr, SocketAddr};
 use std::{env, io, path::Path};
 use warp::http::{self, HeaderValue, StatusCode};
@@ -100,10 +103,63 @@ where
     */
 }
 
+/// Dir entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
+struct Entry {
+    is_ok: bool,
+    read_name_lossy: Option<String>,
+    has_dir: bool,
+    has_read_symlink: bool,
+    has_write_symlink: bool,
+    write_name_lossy: Option<String>,
+}
+impl Entry {
+    fn new_dir(entry: DirEntry) -> Self {
+        let path = entry.path();
+        Self {
+            is_ok: true,
+            read_name_lossy: Some(path.to_string_lossy().to_string()),
+            has_dir: path.is_dir(),
+            has_read_symlink: false,
+            has_write_symlink: false,
+            write_name_lossy: None,
+        }
+    }
+    fn has_read_name(&self) -> bool {
+        self.read_name_lossy.is_some()
+    }
+    fn read_name(&self) -> &str {
+        if let Some(read_name) = &self.read_name_lossy {
+            return read_name;
+        }
+        panic!("No read name.")
+    }
+    fn has_write_name(&self) -> bool {
+        self.write_name_lossy.is_some()
+    }
+    fn write_name(&self) -> &str {
+        if let Some(write_name) = &self.write_name_lossy {
+            return write_name;
+        }
+        panic!("No write name.")
+    }
+}
+impl Default for Entry {
+    fn default() -> Self {
+        Self {
+            is_ok: true,
+            read_name_lossy: None,
+            has_dir: false,
+            has_read_symlink: false,
+            has_write_symlink: false,
+            write_name_lossy: None,
+        }
+    }
+}
+
 #[derive(Template)]
 #[template(path = "admin_list.html")]
 struct AdminListTemplate {
-    dirs: Vec<DirEntry>,
+    entries: Vec<Entry>,
 }
 
 // Thanks to https://blog.logrocket.com/template-rendering-in-rust
@@ -112,15 +168,31 @@ type WebResult<T> = std::result::Result<T, Rejection>;
 async fn admin_list() -> WebResult<impl Reply> {
     let dirs = fs::read_dir(DIRS).map_err(|e| reject::custom(Rej(e)))?;
 
-    let mut dirs_vec = Vec::<DirEntry>::new();
+    let mut dirs_vec = Vec::<Entry>::new();
     for entry in dirs {
         match entry {
-            Ok(dir) => dirs_vec.push(dir),
+            Ok(dir_entry) => dirs_vec.push(Entry::new_dir(dir_entry)),
             Err(err) => return Err(reject::custom(Rej(err))),
         }
     }
 
-    let template = AdminListTemplate { dirs: dirs_vec };
+    if false {
+        let dir = loop {} as DirEntry;
+        dir.path().as_os_str().is_ascii();
+        dir.path().symlink_metadata();
+        dir.path().read_link();
+        dir.path().display();
+        //(dir.path() as Debug).
+        dir.path().to_string_lossy();
+        if let Ok(metadata) = dir.metadata() {
+            //metadata.is_symlink()
+        }
+        if let Ok(file_type) = dir.file_type() {
+            if file_type.is_dir() {}
+        }
+    }
+
+    let template = AdminListTemplate { entries: dirs_vec };
     let res = template.render().map_err(|e| reject::custom(Rej(e)))?;
     Ok(reply::html(res))
 }
