@@ -115,9 +115,40 @@ fn file_name_leaf(path: &Path) -> String {
 }
 
 /// Return the target - but as-is, NOT canonical!
-fn read_link_full<P: AsRef<Path>>(path: P) -> String {
+fn read_link_full<P: AsRef<Path>>(path: &P) -> String {
     let link = fs::read_link(path).expect("Expecting {path} to be a symlink.");
     link.as_os_str().to_string_lossy().to_string()
+}
+
+fn exists(path: &Path) -> bool {
+    let target_exists = path.try_exists();
+    matches!(target_exists, Ok(true))
+}
+
+#[derive(Debug)]
+enum SecondaryIncorrectKind {
+    OrphanOrDifferentSymlink { target: String, is_orphan: bool },
+    NonSymlink { is_dir: bool },
+}
+
+type WriteNameAndKind = (
+    String, /*write_name*/
+    Result<(), SecondaryIncorrectKind>,
+);
+
+#[derive(Debug)]
+enum ReadAndOrWriteIncorrectKind {
+    PrimaryAndReadIncorrect {
+        read: SecondaryIncorrectKind,
+        write: Option<WriteNameAndKind>,
+    },
+    PrimaryAndReadOkButWriteIncorrect {
+        write_name: String,
+        kind: SecondaryIncorrectKind,
+    },
+    PrimaryAndWriteOnly {
+        write_name: String,
+    },
 }
 
 /// Dir entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
@@ -126,44 +157,51 @@ enum Entry {
     PrimaryOnly {
         name: String,
     },
-    ReadOnly {
+    PrimaryAndReadOnly {
         name: String,
     },
-    ReadWrite {
+    PrimaryAndReadWrite {
         name: String,
-        // Write symlink (hash-based) name
+        // Write symlink (hash-based) source name
         write_name: String,
     },
-    PrimaryAndWriteOnly {
+    PrimaryAndReadAndOrWriteIncorrect {
         name: String,
-        write_name: String,
+        kind: ReadAndOrWriteIncorrectKind,
     },
     PrimaryNonDir {
         name: String,
         path: PathBuf,
     },
-    SecondaryReadOrphanSymlink {
+
+    SecondaryIncorrect {
         name: String,
-        target: String,
-    },
-    SecondaryReadNonSymlink {
-        name: String,
-        is_dir: bool,
-    },
-    SecondaryWriteOrphanSymlink {
-        name: String,
-        target: String,
-    },
-    SecondaryWriteNonSymlink {
-        name: String,
-        is_dir: bool,
-    },
+        /// Whether it's under [SYMLINKS_READ]. Otherwise it's under [SYMLINKS_WRITE].
+        is_read: bool,
+        kind: SecondaryIncorrectKind,
+    }, /*,
+       SecondaryReadOrphanSymlink {
+           name: String,
+           target: String,
+       },
+       SecondaryReadNonSymlink {
+           name: String,
+           is_dir: bool,
+       },
+       SecondaryWriteOrphanSymlink {
+           name: String,
+           target: String,
+       },
+       SecondaryWriteNonSymlink {
+           name: String,
+           is_dir: bool,
+       },*/
 }
 
 impl Entry {
     fn is_ok_and_complete(&self) -> bool {
         match self {
-            Self::ReadOnly { .. } | Self::ReadWrite { .. } => true,
+            Self::PrimaryAndReadOnly { .. } | Self::PrimaryAndReadWrite { .. } => true,
             _ => false,
         }
     }
@@ -171,23 +209,21 @@ impl Entry {
         self.is_ok_and_complete()
     }
     fn is_writable(&self) -> bool {
-        matches!(self, Self::ReadWrite { .. })
+        matches!(self, Self::PrimaryAndReadWrite { .. })
     }
     fn name(&self) -> &str {
         match self {
             Self::PrimaryOnly { name }
-            | Self::ReadOnly { name }
-            | Self::ReadWrite { name, .. }
-            | Self::SecondaryReadOrphanSymlink { name, .. }
-            | Self::SecondaryReadNonSymlink { name, .. }
-            | Self::SecondaryWriteOrphanSymlink { name, .. }
-            | Self::SecondaryWriteNonSymlink { name, .. } => &name,
-            _ => unreachable!("Called on an unsupported variant {:?}.", self),
+            | Self::PrimaryAndReadOnly { name }
+            | Self::PrimaryAndReadWrite { name, .. }
+            | Self::PrimaryAndReadAndOrWriteIncorrect { name, .. }
+            | Self::PrimaryNonDir { name, .. }
+            | Self::SecondaryIncorrect { name, .. } => &name,
         }
     }
     fn write_name(&self) -> &str {
         match self {
-            Self::ReadWrite {
+            Self::PrimaryAndReadWrite {
                 name: _,
                 write_name: write,
             } => &write,
@@ -209,10 +245,37 @@ impl Entry {
     }
 
     fn and_readable_symlink(self, entry: DirEntry) -> Self {
+        let path = entry.path();
         if let Self::PrimaryOnly { name } = self {
-            let target_full = read_link_full(entry.path());
-            assert_eq!(target_full, format!("{SYMLINKS_READ}/{name}"), "Symlink {target_full} doesn't match primary directory {name}.");
-            return Self::ReadOnly { name };
+            return if path.is_symlink() {
+                let target = read_link_full(&path);
+                if target == format!("{SYMLINKS_READ}/{name}") {
+                    Self::PrimaryAndReadOnly { name }
+                } else {
+                    let is_orphan = exists(&path);
+
+                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                        name,
+                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
+                            read: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
+                                target,
+                                is_orphan,
+                            },
+                            write: None,
+                        },
+                    }
+                }
+            } else {
+                Self::PrimaryAndReadAndOrWriteIncorrect {
+                    name,
+                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
+                        read: SecondaryIncorrectKind::NonSymlink {
+                            is_dir: path.is_dir(),
+                        },
+                        write: None,
+                    },
+                }
+            };
         }
         panic!(
             "Expected variant PrimaryOnly, but called on variant {:?}.",
@@ -220,36 +283,106 @@ impl Entry {
         );
     }
 
-    fn new_under_readable_symlinks(path: PathBuf) -> Self {
+    fn _new_under_symlinks(path: PathBuf, is_read: bool) -> Self {
         let name = file_name_leaf(&path);
 
         if path.is_symlink() {
-            Self::SecondaryReadOrphanSymlink {
+            let target = read_link_full(&path);
+            let is_orphan = exists(&path);
+            Self::SecondaryIncorrect {
                 name,
-                target: read_link_full(path),
+                is_read,
+                kind: SecondaryIncorrectKind::OrphanOrDifferentSymlink { target, is_orphan },
             }
         } else {
-            Self::SecondaryReadNonSymlink {
+            let is_dir = path.is_dir();
+            Self::SecondaryIncorrect {
                 name,
-                is_dir: path.is_dir(),
+                is_read,
+                kind: SecondaryIncorrectKind::NonSymlink { is_dir },
             }
         }
     }
 
+    fn new_under_readable_symlinks(path: PathBuf) -> Self {
+        Self::_new_under_symlinks(path, true)
+    }
+
     fn and_writable_symlink(self, entry: DirEntry) -> Self {
-        if let Self::PrimaryOnly { name } = self {
-            let target_full = read_link_full(entry.path());
-            assert_eq!(target_full, format!("{SYMLINKS_READ}/{name}"), "Symlink {target_full} doesn't match primary directory {name}.");
-            return Self::ReadOnly { name };
+        let path = entry.path();
+        if let Self::PrimaryAndReadOnly { name } = self {
+            //@TODO
+            return if path.is_symlink() {
+                let target = read_link_full(&path);
+                // @TODO hash!!!!:
+                if target == format!("{SYMLINKS_WRITE}/{name}") {
+                    Self::PrimaryAndReadOnly { name }
+                } else {
+                    let is_orphan = exists(&path);
+
+                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                        name,
+                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
+                            read: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
+                                target,
+                                is_orphan,
+                            },
+                            write: None,
+                        },
+                    }
+                }
+            } else {
+                Self::PrimaryAndReadAndOrWriteIncorrect {
+                    name,
+                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
+                        read: SecondaryIncorrectKind::NonSymlink {
+                            is_dir: path.is_dir(),
+                        },
+                        write: None,
+                    },
+                }
+            };
+        } else if let Self::PrimaryOnly { name } = self {
+            // @TODO -> PrimaryAndWriteOnly
+
+            return if path.is_symlink() {
+                let target = read_link_full(&path);
+                if target == format!("{SYMLINKS_READ}/{name}") {
+                    let is_orphan = exists(&path);
+
+                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                        name,
+                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
+                            read: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
+                                target,
+                                is_orphan,
+                            },
+                            write: None,
+                        },
+                    }
+                } else {
+                    Self::PrimaryAndReadOnly { name }
+                }
+            } else {
+                Self::PrimaryAndReadAndOrWriteIncorrect {
+                    name,
+                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
+                        read: SecondaryIncorrectKind::NonSymlink {
+                            is_dir: path.is_dir(),
+                        },
+                        write: None,
+                    },
+                }
+            };
         }
         panic!(
-            "Expected variant PrimaryOnly, but called on variant {:?}.",
+            "Expected variant PrimaryAndReadOnly or PrimaryOnly, but called on variant {:?}.",
             self
         );
     }
 
     fn new_under_writable_symlinks(path: PathBuf) -> Self {
-
+        Self::_new_under_symlinks(path, false)
     }
 }
 
@@ -314,6 +447,7 @@ async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
     if let Err(e) = dir_result {
         return Err(reject::custom(Rej(e)));
     }
+    // @TODO replace with redirect::see_other(...):
     redirect_see_other(format!("/{ADMIN}"))
 }
 
