@@ -1,4 +1,6 @@
-use crate::entry::{Entry, ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind, WriteNameAndKind};
+use crate::entry::{
+    self, Entry, ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind, WriteNameAndKind,
+};
 use crate::{ADMIN, READ, SYMLINKS, SYMLINKS_READ, SYMLINKS_WRITE, WRITE};
 use askama::Template;
 use dav_server::{self, fakels::FakeLs, localfs::LocalFs, DavMethod};
@@ -96,18 +98,7 @@ pub(crate) struct AdminListTemplate {
 pub(crate) type WebResult<T> = std::result::Result<T, Rejection>;
 
 pub(crate) async fn admin_list() -> WebResult<impl Reply> {
-    let dirs = fs::read_dir(DIRS).map_err(|e| reject::custom(Rej(e)))?;
-
-    let mut entries = HashMap::<String, Entry>::new();
-    for dir_entry in dirs {
-        match dir_entry {
-            Ok(entry) => {
-                let entry = Entry::new_under_dirs(entry);
-                entries.insert(entry.name().to_owned(), entry);
-            }
-            Err(err) => return Err(reject::custom(Rej(err))),
-        }
-    }
+    let entries = entry::get_entries().map_err(|e| reject::custom(Rej(e)))?;
 
     let template = AdminListTemplate { entries };
     let res = template.render().map_err(|e| reject::custom(Rej(e)))?;

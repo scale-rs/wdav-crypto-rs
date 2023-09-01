@@ -1,5 +1,7 @@
-use crate::{SYMLINKS_READ, SYMLINKS_WRITE};
+use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
+use std::collections::HashMap;
 use std::fs::{self, DirEntry};
+use std::io;
 use std::{path::Path, path::PathBuf};
 
 /// Require `path` leaf part not to be `..`.
@@ -22,18 +24,18 @@ fn exists(path: &Path) -> bool {
 }
 
 #[derive(Debug)]
-pub enum SecondaryIncorrectKind {
+pub(crate) enum SecondaryIncorrectKind {
     OrphanOrDifferentSymlink { target: String, is_orphan: bool },
     NonSymlink { is_dir: bool },
 }
 
-pub type WriteNameAndKind = (
+pub(crate) type WriteNameAndKind = (
     String, /*write_name*/
     Result<(), SecondaryIncorrectKind>,
 );
 
 #[derive(Debug)]
-pub enum ReadAndOrWriteIncorrectKind {
+pub(crate) enum ReadAndOrWriteIncorrectKind {
     PrimaryAndReadIncorrect {
         read: SecondaryIncorrectKind,
         write: Option<WriteNameAndKind>,
@@ -53,7 +55,7 @@ pub enum ReadAndOrWriteIncorrectKind {
 
 /// Dir entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
 #[derive(Debug)]
-pub enum Entry {
+pub(crate) enum Entry {
     PrimaryOnly {
         name: String,
     },
@@ -99,19 +101,19 @@ pub enum Entry {
 }
 
 impl Entry {
-    pub fn is_ok_and_complete(&self) -> bool {
+    pub(crate) fn is_ok_and_complete(&self) -> bool {
         match self {
             Self::PrimaryAndReadOnly { .. } | Self::PrimaryAndReadWrite { .. } => true,
             _ => false,
         }
     }
-    pub fn is_readable(&self) -> bool {
+    pub(crate) fn is_readable(&self) -> bool {
         self.is_ok_and_complete()
     }
-    pub fn is_writable(&self) -> bool {
+    pub(crate) fn is_writable(&self) -> bool {
         matches!(self, Self::PrimaryAndReadWrite { .. })
     }
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             Self::PrimaryOnly { name }
             | Self::PrimaryAndReadOnly { name }
@@ -121,7 +123,7 @@ impl Entry {
             | Self::SecondaryIncorrect { name, .. } => &name,
         }
     }
-    pub fn write_name(&self) -> &str {
+    pub(crate) fn write_name(&self) -> &str {
         match self {
             Self::PrimaryAndReadWrite {
                 name: _,
@@ -134,8 +136,7 @@ impl Entry {
         }
     }
 
-    pub fn new_under_dirs(entry: DirEntry) -> Self {
-        let path = entry.path();
+    pub(crate) fn new_under_dirs(path: PathBuf) -> Self {
         let name = path.to_string_lossy().to_string();
         if path.is_dir() {
             Self::PrimaryOnly { name }
@@ -144,9 +145,7 @@ impl Entry {
         }
     }
 
-    pub fn and_readable_symlink(self, entry: DirEntry) -> Self {
-        let path = entry.path();
-
+    pub(crate) fn and_readable_symlink(self, path: PathBuf) -> Self {
         if let Self::PrimaryOnly { name } = self {
             return if path.is_symlink() {
                 let target = read_link_full(&path);
@@ -184,12 +183,12 @@ impl Entry {
         );
     }
 
-    pub fn _new_under_symlinks(path: PathBuf, is_read: bool) -> Self {
-        let name = file_name_leaf(&path);
+    fn _new_under_symlinks(path: &PathBuf, is_read: bool) -> Self {
+        let name = file_name_leaf(path);
 
         if path.is_symlink() {
-            let target = read_link_full(&path);
-            let is_orphan = exists(&path);
+            let target = read_link_full(path);
+            let is_orphan = exists(path);
             Self::SecondaryIncorrect {
                 name,
                 is_read,
@@ -205,14 +204,13 @@ impl Entry {
         }
     }
 
-    pub fn new_under_readable_symlinks(path: PathBuf) -> Self {
+    pub(crate) fn new_under_readable_symlinks(path: &PathBuf) -> Self {
         Self::_new_under_symlinks(path, true)
     }
 
-    pub fn and_writable_symlink(self, entry: DirEntry) -> Self {
+    pub(crate) fn and_writable_symlink(self, path: PathBuf) -> Self {
         // @TODO hash!!!!:
         let write_name = self.name().clone().to_owned();
-        let path = entry.path();
 
         if let Self::PrimaryAndReadOnly { name } = self {
             return if path.is_symlink() {
@@ -284,7 +282,68 @@ impl Entry {
         );
     }
 
-    pub fn new_under_writable_symlinks(path: PathBuf) -> Self {
+    pub(crate) fn new_under_writable_symlinks(path: &PathBuf) -> Self {
         Self::_new_under_symlinks(path, false)
     }
+}
+
+pub(crate) type EntriesMap = HashMap<String, Entry>;
+
+fn get_primaries() -> io::Result<EntriesMap> {
+    let dirs = fs::read_dir(DIRS)?;
+
+    let mut entries = EntriesMap::new();
+    for dir_entry in dirs {
+        let entry = Entry::new_under_dirs(dir_entry?.path());
+        entries.insert(entry.name().to_owned(), entry);
+    }
+    Ok(entries)
+}
+
+/// Call on result of [get_primaries].
+fn get_secondaries_read(mut primaries: EntriesMap) -> io::Result<EntriesMap> {
+    let secondaries = fs::read_dir(SYMLINKS_READ)?;
+    let mut entries = EntriesMap::new();
+
+    for secondary in secondaries {
+        let path = secondary?.path();
+        let name = file_name_leaf(&path);
+
+        let primary = primaries.remove(&name);
+        let new_entry = if let Some(primary) = primary {
+            primary.and_readable_symlink(path)
+        } else {
+            Entry::new_under_readable_symlinks(&path)
+        };
+
+        entries.insert(name, new_entry);
+    }
+    Ok(entries)
+}
+
+/// Call on result of [get_secondaries_read].
+fn get_secondaries_write(mut secondaries_read: EntriesMap) -> io::Result<EntriesMap> {
+    let secondaries_write = fs::read_dir(SYMLINKS_WRITE)?;
+    let mut entries = EntriesMap::new();
+
+    for secondary_write in secondaries_write {
+        let path = secondary_write?.path();
+        let name = file_name_leaf(&path);
+
+        let secondary_read = secondaries_read.remove(&name);
+        let new_entry = if let Some(secondary_read) = secondary_read {
+            secondary_read.and_writable_symlink(path)
+        } else {
+            Entry::new_under_writable_symlinks(&path)
+        };
+
+        entries.insert(name, new_entry);
+    }
+    Ok(entries)
+}
+
+pub(crate) fn get_entries() -> io::Result<EntriesMap> {
+    let primaries = get_primaries()?;
+    let secondaries_read = get_secondaries_read(primaries)?;
+    get_secondaries_write(secondaries_read)
 }
