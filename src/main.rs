@@ -106,6 +106,20 @@ where
     */
 }
 
+/// Require `path` leaf part not to be `..`.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .expect("The path must not be `..`")
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Return the target - but as-is, NOT canonical!
+fn read_link<P: AsRef<Path>>(path: P) -> String {
+    let link = fs::read_link(path).expect("Expecting {path} to be a symlink.");
+    link.as_os_str().to_string_lossy().to_string()
+}
+
 /// Dir entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
 #[derive(Debug)]
 enum Entry {
@@ -121,17 +135,20 @@ enum Entry {
         write_name: String,
     },
     PrimaryNonDir {
+        name: String,
         path: PathBuf,
     },
-    SecondaryReadOrphan {
+    SecondaryReadOrphanSymlink {
         name: String,
+        target: String,
     },
     SecondaryReadNonSymlink {
         name: String,
         is_dir: bool,
     },
-    SecondaryWriteOrphan {
+    SecondaryWriteOrphanSymlink {
         name: String,
+        target: String,
     },
     SecondaryWriteNonSymlink {
         name: String,
@@ -140,14 +157,14 @@ enum Entry {
 }
 
 impl Entry {
-    fn is_ok(&self) -> bool {
+    fn is_ok_and_complete(&self) -> bool {
         match self {
             Self::ReadOnly { .. } | Self::ReadWrite { .. } => true,
             _ => false,
         }
     }
     fn is_readable(&self) -> bool {
-        self.is_ok()
+        self.is_ok_and_complete()
     }
     fn is_writable(&self) -> bool {
         matches!(self, Self::ReadWrite { .. })
@@ -157,9 +174,9 @@ impl Entry {
             Self::PrimaryOnly { name }
             | Self::ReadOnly { name }
             | Self::ReadWrite { name, .. }
-            | Self::SecondaryReadOrphan { name }
+            | Self::SecondaryReadOrphanSymlink { name, .. }
             | Self::SecondaryReadNonSymlink { name, .. }
-            | Self::SecondaryWriteOrphan { name }
+            | Self::SecondaryWriteOrphanSymlink { name, .. }
             | Self::SecondaryWriteNonSymlink { name, .. } => &name,
             _ => unreachable!("Called on an unsupported variant {:?}.", self),
         }
@@ -181,13 +198,37 @@ impl Entry {
         let path = entry.path();
         let name = path.to_string_lossy().to_string();
         if path.is_dir() {
-            Self::ReadOnly { name }
+            Self::PrimaryOnly { name }
         } else {
-            Self::PrimaryNonDir { path }
+            Self::PrimaryNonDir { name, path }
         }
     }
 
-    fn and_redable_symlink() {}
+    fn and_readable_symlink(self) -> Self {
+        if let Self::PrimaryOnly { name } = self {
+            return Self::ReadOnly { name };
+        }
+        panic!(
+            "Expected variant PrimaryOnly, but called on variant {:?}.",
+            self
+        );
+    }
+
+    fn new_under_symlinks(path: PathBuf) -> Self {
+        let name = file_name(&path);
+
+        if path.is_symlink() {
+            Self::SecondaryReadOrphanSymlink {
+                name,
+                target: read_link(path),
+            }
+        } else {
+            Self::SecondaryReadNonSymlink {
+                name,
+                is_dir: path.is_dir(),
+            }
+        }
+    }
 }
 
 /// Directory entries, mapped by their (potentially lossy) names.
