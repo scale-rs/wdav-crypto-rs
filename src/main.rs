@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self, DirEntry};
 use std::net::{IpAddr, SocketAddr};
-use std::{env, io, path::Path};
+use std::{env, io, path::Path, path::PathBuf};
 use warp::http::{self, HeaderValue, StatusCode};
 use warp::{redirect, reject, reject::Reject, reject::Rejection, reply, Filter, Reply};
 
@@ -47,6 +47,8 @@ const SYMLINKS_WRITE: &'static str = formatcp!("{SYMLINKS}/{WRITE}");
 const SYMLINKS_READ: &'static str = formatcp!("{SYMLINKS}/{READ}");
 
 const CLEANUP_IN_PROGRESS: &'static str = formatcp!("{SYMLINKS}/CLEANUP_IN_PROGRESS");
+
+const EMPTY_NAME: String = String::new();
 
 fn dav_config(
     prefix_segment: impl core::fmt::Display,
@@ -105,56 +107,87 @@ where
 }
 
 /// Dir entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
-struct Entry {
-    is_ok: bool,
-    read_name_lossy: Option<String>,
-    has_dir: bool,
-    has_read_symlink: bool,
-    has_write_symlink: bool,
-    write_name_lossy: Option<String>,
+#[derive(Debug)]
+enum Entry {
+    PrimaryOnly {
+        name: String,
+    },
+    ReadOnly {
+        name: String,
+    },
+    ReadWrite {
+        name: String,
+        // Write symlink (hash-based) name
+        write_name: String,
+    },
+    PrimaryNonDir {
+        path: PathBuf,
+    },
+    SecondaryReadOrphan {
+        name: String,
+    },
+    SecondaryReadNonSymlink {
+        name: String,
+        is_dir: bool,
+    },
+    SecondaryWriteOrphan {
+        name: String,
+    },
+    SecondaryWriteNonSymlink {
+        name: String,
+        is_dir: bool,
+    },
 }
+
 impl Entry {
-    fn new_dir(entry: DirEntry) -> Self {
-        let path = entry.path();
-        Self {
-            is_ok: true,
-            read_name_lossy: Some(path.to_string_lossy().to_string()),
-            has_dir: path.is_dir(),
-            has_read_symlink: false,
-            has_write_symlink: false,
-            write_name_lossy: None,
+    fn is_ok(&self) -> bool {
+        match self {
+            Self::ReadOnly { .. } | Self::ReadWrite { .. } => true,
+            _ => false,
         }
     }
-    fn has_read_name(&self) -> bool {
-        self.read_name_lossy.is_some()
+    fn is_readable(&self) -> bool {
+        self.is_ok()
     }
-    fn read_name(&self) -> &str {
-        if let Some(read_name) = &self.read_name_lossy {
-            return read_name;
+    fn is_writable(&self) -> bool {
+        matches!(self, Self::ReadWrite { .. })
+    }
+    fn name(&self) -> &str {
+        match self {
+            Self::PrimaryOnly { name }
+            | Self::ReadOnly { name }
+            | Self::ReadWrite { name, .. }
+            | Self::SecondaryReadOrphan { name }
+            | Self::SecondaryReadNonSymlink { name, .. }
+            | Self::SecondaryWriteOrphan { name }
+            | Self::SecondaryWriteNonSymlink { name, .. } => &name,
+            _ => unreachable!("Called on an unsupported variant {:?}.", self),
         }
-        panic!("No read name.")
-    }
-    fn has_write_name(&self) -> bool {
-        self.write_name_lossy.is_some()
     }
     fn write_name(&self) -> &str {
-        if let Some(write_name) = &self.write_name_lossy {
-            return write_name;
-        }
-        panic!("No write name.")
-    }
-}
-impl Default for Entry {
-    fn default() -> Self {
-        Self {
-            is_ok: true,
-            read_name_lossy: None,
-            has_dir: false,
-            has_read_symlink: false,
-            has_write_symlink: false,
-            write_name_lossy: None,
+        match self {
+            Self::ReadWrite {
+                name: _,
+                write_name: write,
+            } => &write,
+            _ => unreachable!(
+                "Can be called only on ReadWrite variant, but it was invoked on {:?}.",
+                self
+            ),
         }
     }
+
+    fn new_under_dirs(entry: DirEntry) -> Self {
+        let path = entry.path();
+        let name = path.to_string_lossy().to_string();
+        if path.is_dir() {
+            Self::ReadOnly { name }
+        } else {
+            Self::PrimaryNonDir { path }
+        }
+    }
+
+    fn and_redable_symlink() {}
 }
 
 /// Directory entries, mapped by their (potentially lossy) names.
@@ -174,8 +207,8 @@ async fn admin_list() -> WebResult<impl Reply> {
     for dir_entry in dirs {
         match dir_entry {
             Ok(entry) => {
-                let entry = Entry::new_dir(entry);
-                entries.insert(entry.read_name().to_owned(), entry);
+                let entry = Entry::new_under_dirs(entry);
+                entries.insert(entry.name().to_owned(), entry);
             }
             Err(err) => return Err(reject::custom(Rej(err))),
         }
