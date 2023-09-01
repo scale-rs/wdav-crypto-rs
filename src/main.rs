@@ -107,7 +107,7 @@ where
 }
 
 /// Require `path` leaf part not to be `..`.
-fn file_name(path: &Path) -> String {
+fn file_name_leaf(path: &Path) -> String {
     path.file_name()
         .expect("The path must not be `..`")
         .to_string_lossy()
@@ -115,7 +115,7 @@ fn file_name(path: &Path) -> String {
 }
 
 /// Return the target - but as-is, NOT canonical!
-fn read_link<P: AsRef<Path>>(path: P) -> String {
+fn read_link_full<P: AsRef<Path>>(path: P) -> String {
     let link = fs::read_link(path).expect("Expecting {path} to be a symlink.");
     link.as_os_str().to_string_lossy().to_string()
 }
@@ -132,6 +132,10 @@ enum Entry {
     ReadWrite {
         name: String,
         // Write symlink (hash-based) name
+        write_name: String,
+    },
+    PrimaryAndWriteOnly {
+        name: String,
         write_name: String,
     },
     PrimaryNonDir {
@@ -204,8 +208,10 @@ impl Entry {
         }
     }
 
-    fn and_readable_symlink(self) -> Self {
+    fn and_readable_symlink(self, entry: DirEntry) -> Self {
         if let Self::PrimaryOnly { name } = self {
+            let target_full = read_link_full(entry.path());
+            assert_eq!(target_full, format!("{SYMLINKS_READ}/{name}"), "Symlink {target_full} doesn't match primary directory {name}.");
             return Self::ReadOnly { name };
         }
         panic!(
@@ -214,13 +220,13 @@ impl Entry {
         );
     }
 
-    fn new_under_symlinks(path: PathBuf) -> Self {
-        let name = file_name(&path);
+    fn new_under_readable_symlinks(path: PathBuf) -> Self {
+        let name = file_name_leaf(&path);
 
         if path.is_symlink() {
             Self::SecondaryReadOrphanSymlink {
                 name,
-                target: read_link(path),
+                target: read_link_full(path),
             }
         } else {
             Self::SecondaryReadNonSymlink {
@@ -228,6 +234,22 @@ impl Entry {
                 is_dir: path.is_dir(),
             }
         }
+    }
+
+    fn and_writable_symlink(self, entry: DirEntry) -> Self {
+        if let Self::PrimaryOnly { name } = self {
+            let target_full = read_link_full(entry.path());
+            assert_eq!(target_full, format!("{SYMLINKS_READ}/{name}"), "Symlink {target_full} doesn't match primary directory {name}.");
+            return Self::ReadOnly { name };
+        }
+        panic!(
+            "Expected variant PrimaryOnly, but called on variant {:?}.",
+            self
+        );
+    }
+
+    fn new_under_writable_symlinks(path: PathBuf) -> Self {
+
     }
 }
 
