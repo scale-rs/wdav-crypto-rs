@@ -30,8 +30,8 @@ const ENV_SALT: &'static str = "SALT";
 
 // Directory names here don't have a trailing slash.
 //
-// const TMP: &'static str = "/tmp"; // @TODO add if we use `const_format`
-const DIRS: &'static str = "/tmp/wdav_dirs";
+const TMP: &'static str = "/tmp";
+const DIRS: &'static str = formatcp!("{TMP}/wdav_dirs");
 
 // Leading URL "segments" (top level directories). Warp requires them NOT to contain any slash.
 const READ: &'static str = "read";
@@ -144,10 +144,14 @@ enum ReadAndOrWriteIncorrectKind {
     },
     PrimaryAndReadOkButWriteIncorrect {
         write_name: String,
-        kind: SecondaryIncorrectKind,
+        write: SecondaryIncorrectKind,
     },
     PrimaryAndWriteOnly {
         write_name: String,
+    },
+    PrimaryAndWriteOnlyAndIncorrect {
+        write_name: String,
+        write: SecondaryIncorrectKind,
     },
 }
 
@@ -246,13 +250,14 @@ impl Entry {
 
     fn and_readable_symlink(self, entry: DirEntry) -> Self {
         let path = entry.path();
+
         if let Self::PrimaryOnly { name } = self {
             return if path.is_symlink() {
                 let target = read_link_full(&path);
                 if target == format!("{SYMLINKS_READ}/{name}") {
                     Self::PrimaryAndReadOnly { name }
                 } else {
-                    let is_orphan = exists(&path);
+                    let is_orphan = !exists(&path);
 
                     Self::PrimaryAndReadAndOrWriteIncorrect {
                         name,
@@ -309,68 +314,70 @@ impl Entry {
     }
 
     fn and_writable_symlink(self, entry: DirEntry) -> Self {
+        // @TODO hash!!!!:
+        let write_name = self.name().clone().to_owned();
         let path = entry.path();
+
         if let Self::PrimaryAndReadOnly { name } = self {
-            //@TODO
             return if path.is_symlink() {
                 let target = read_link_full(&path);
-                // @TODO hash!!!!:
-                if target == format!("{SYMLINKS_WRITE}/{name}") {
-                    Self::PrimaryAndReadOnly { name }
+                if target == format!("{SYMLINKS_WRITE}/{write_name}") {
+                    Self::PrimaryAndReadWrite { name, write_name }
                 } else {
-                    let is_orphan = exists(&path);
+                    let is_orphan = !exists(&path);
 
                     Self::PrimaryAndReadAndOrWriteIncorrect {
                         name,
-                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
-                            read: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
+                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadOkButWriteIncorrect {
+                            write: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
                                 target,
                                 is_orphan,
                             },
-                            write: None,
+                            write_name,
                         },
                     }
                 }
             } else {
                 Self::PrimaryAndReadAndOrWriteIncorrect {
                     name,
-                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
-                        read: SecondaryIncorrectKind::NonSymlink {
+                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadOkButWriteIncorrect {
+                        write_name,
+                        write: SecondaryIncorrectKind::NonSymlink {
                             is_dir: path.is_dir(),
                         },
-                        write: None,
                     },
                 }
             };
         } else if let Self::PrimaryOnly { name } = self {
-            // @TODO -> PrimaryAndWriteOnly
-
             return if path.is_symlink() {
                 let target = read_link_full(&path);
-                if target == format!("{SYMLINKS_READ}/{name}") {
-                    let is_orphan = exists(&path);
+                if target == format!("{SYMLINKS_WRITE}/{write_name}") {
+                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                        name,
+                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnly { write_name },
+                    }
+                } else {
+                    let is_orphan = !exists(&path);
 
                     Self::PrimaryAndReadAndOrWriteIncorrect {
                         name,
-                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
-                            read: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
+                        kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnlyAndIncorrect {
+                            write_name,
+                            write: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
                                 target,
                                 is_orphan,
                             },
-                            write: None,
                         },
                     }
-                } else {
-                    Self::PrimaryAndReadOnly { name }
                 }
             } else {
                 Self::PrimaryAndReadAndOrWriteIncorrect {
                     name,
-                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
-                        read: SecondaryIncorrectKind::NonSymlink {
+                    kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnlyAndIncorrect {
+                        write_name,
+                        write: SecondaryIncorrectKind::NonSymlink {
                             is_dir: path.is_dir(),
                         },
-                        write: None,
                     },
                 }
             };
