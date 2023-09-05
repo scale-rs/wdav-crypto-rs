@@ -1,4 +1,5 @@
 use super::{ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind};
+use crate::fs::FileSystem;
 use crate::{SYMLINKS_READ, SYMLINKS_WRITE};
 #[cfg(test)]
 use mockall::automock;
@@ -58,6 +59,8 @@ pub struct Entry {
     entry_impl: EntryImpl,
 }
 
+// Can't use `#[cfg_attr(test, automock)]`, because when `fs::fs_mockable` calls
+// `and_readable_symlink`, it would pass `FileSystem` instead of `MockFileSystem`.
 #[cfg_attr(test, automock)]
 impl Entry {
     fn new(entry_impl: EntryImpl) -> Self {
@@ -107,14 +110,14 @@ impl Entry {
         }
     }
 
-    pub(crate) fn and_readable_symlink(self, path: PathBuf) -> Self {
+    pub(crate) fn and_readable_symlink(self, fs: &FileSystem, path: PathBuf) -> Self {
         if let EntryImpl::PrimaryOnly { name } = self.entry_impl {
             return Self::new(if path.is_symlink() {
-                let target = super::read_link_full(&path);
+                let target = fs.read_link_full(&path);
                 if target == format!("{SYMLINKS_READ}/{name}") {
                     EntryImpl::PrimaryAndReadOnly { name }
                 } else {
-                    let is_orphan = !super::exists(&path);
+                    let is_orphan = !fs.exists(&path);
 
                     EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
@@ -145,12 +148,12 @@ impl Entry {
         );
     }
 
-    fn _new_under_symlinks(path: &PathBuf, is_read: bool) -> Self {
+    fn _new_under_symlinks(path: &PathBuf, fs: &FileSystem, is_read: bool) -> Self {
         let name = super::file_name_leaf(path);
 
         Self::new(if path.is_symlink() {
-            let target = super::read_link_full(path);
-            let is_orphan = super::exists(path);
+            let target = fs.read_link_full(path);
+            let is_orphan = fs.exists(path);
             EntryImpl::SecondaryIncorrect {
                 name,
                 is_read,
@@ -167,20 +170,22 @@ impl Entry {
     }
 
     pub(crate) fn new_under_readable_symlinks(path: &PathBuf) -> Self {
-        Self::_new_under_symlinks(path, true)
+        let fs = loop {};
+        Self::_new_under_symlinks(path, &fs, true)
     }
 
     pub(crate) fn and_writable_symlink(self, path: PathBuf) -> Self {
+        let fs: FileSystem = loop {};
         // @TODO hash!!!!:
         let write_name = self.name().to_owned();
 
         if let EntryImpl::PrimaryAndReadOnly { name } = self.entry_impl {
             return Self::new(if path.is_symlink() {
-                let target = super::read_link_full(&path);
+                let target = fs.read_link_full(&path);
                 if target == format!("{SYMLINKS_WRITE}/{write_name}") {
                     EntryImpl::PrimaryAndReadWrite { name, write_name }
                 } else {
-                    let is_orphan = !super::exists(&path);
+                    let is_orphan = !fs.exists(&path);
 
                     EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
@@ -206,14 +211,14 @@ impl Entry {
             });
         } else if let EntryImpl::PrimaryOnly { name } = self.entry_impl {
             return Self::new(if path.is_symlink() {
-                let target = super::read_link_full(&path);
+                let target = fs.read_link_full(&path);
                 if target == format!("{SYMLINKS_WRITE}/{write_name}") {
                     EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
                         kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnly { write_name },
                     }
                 } else {
-                    let is_orphan = !super::exists(&path);
+                    let is_orphan = !fs.exists(&path);
 
                     EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
@@ -245,6 +250,7 @@ impl Entry {
     }
 
     pub(crate) fn new_under_writable_symlinks(path: &PathBuf) -> Self {
-        Self::_new_under_symlinks(path, false)
+        let fs = loop {};
+        Self::_new_under_symlinks(path, &fs, false)
     }
 }

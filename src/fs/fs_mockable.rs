@@ -1,7 +1,8 @@
 use crate::entry::{EntriesMap, Entry};
 #[cfg(test)]
 use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
-use mockall::automock;
+#[cfg(test)]
+use mockall::mock;
 use std::fs as std_fs;
 use std::fs;
 use std::io;
@@ -9,8 +10,14 @@ use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystem {}
 
-#[cfg_attr(test, automock)]
+pub(crate) trait UnmockFileSystem {
+    fn get_entries(&self) -> io::Result<EntriesMap>;
+}
+
+#[cfg(not(test))]
 impl FileSystem {
+    /// Return the target - but as-is, NOT canonical!
+    ///
     /// This function could be generic, like `read_link_full<P: AsRef<Path>>(path: P)`. However,
     /// https://docs.rs/mockall/latest/mockall/#generic-methods would then require the generic type
     /// to be `'static`!
@@ -46,7 +53,7 @@ impl FileSystem {
 
             let primary = primaries.remove(&name);
             let new_entry = if let Some(primary) = primary {
-                primary.and_readable_symlink(path)
+                primary.and_readable_symlink(self, path)
             } else {
                 Entry::new_under_readable_symlinks(&path)
             };
@@ -75,5 +82,34 @@ impl FileSystem {
             entries.insert(name, new_entry);
         }
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mock! {
+    pub(crate) FileSystem {
+        pub(crate) fn read_link_full(&self, path: &PathBuf) -> String;
+        pub(crate) fn exists(&self, path: &Path) -> bool;
+        pub(crate) fn get_primaries(&self) -> io::Result<EntriesMap>;
+        pub(crate) fn get_secondaries_read(&self, mut primaries: EntriesMap) -> io::Result<EntriesMap>;
+        fn get_secondaries_write(&self, mut secondaries_read: EntriesMap) -> io::Result<EntriesMap>;
+    }
+}
+
+mod Unmock {
+    #[cfg_attr(test, double)]
+    use super::FileSystem;
+    use super::UnmockFileSystem;
+    use crate::entry::EntriesMap;
+    #[cfg(test)]
+    use mockall_double::double;
+    use std::io;
+
+    impl UnmockFileSystem for FileSystem {
+        fn get_entries(&self) -> io::Result<EntriesMap> {
+            let primaries = self.get_primaries()?;
+            let secondaries_read = self.get_secondaries_read(primaries)?;
+            self.get_secondaries_write(secondaries_read)
+        }
     }
 }

@@ -1,4 +1,5 @@
 use crate::entry;
+use crate::fs::{FileSystem, UnmockFileSystem};
 use crate::{ADMIN, READ, SYMLINKS, SYMLINKS_READ, SYMLINKS_WRITE, WRITE};
 use askama::Template;
 use dav_server::{self, fakels::FakeLs, localfs::LocalFs, DavMethod};
@@ -97,7 +98,8 @@ pub(crate) struct AdminListTemplate {
 pub(crate) type WebResult<T> = std::result::Result<T, Rejection>;
 
 pub(crate) async fn admin_list() -> WebResult<impl Reply> {
-    let entries = entry::get_entries().map_err(|e| reject::custom(Rej(e)))?;
+    let fs: FileSystem = loop {};
+    let entries = fs.get_entries().map_err(|e| reject::custom(Rej(e)))?;
 
     let template = AdminListTemplate { entries };
     let res = template.render().map_err(|e| reject::custom(Rej(e)))?;
