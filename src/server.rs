@@ -1,6 +1,5 @@
-use crate::entry::{
-    self, Entry, ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind, WriteNameAndKind,
-};
+pub use crate::entry::Entry;
+use crate::entry::{self, ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind, WriteNameAndKind};
 use crate::{ADMIN, READ, SYMLINKS, SYMLINKS_READ, SYMLINKS_WRITE, WRITE};
 use askama::Template;
 use dav_server::{self, fakels::FakeLs, localfs::LocalFs, DavMethod};
