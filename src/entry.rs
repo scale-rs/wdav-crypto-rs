@@ -55,16 +55,13 @@ pub(crate) enum ReadAndOrWriteIncorrectKind {
 }
 
 mod mockable {
-    use super::{ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind, WriteNameAndKind};
-    use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
+    use super::{ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind};
+    use crate::{SYMLINKS_READ, SYMLINKS_WRITE};
     #[cfg(test)]
     use mockall::automock;
-    use std::fs::DirEntry;
     use std::path::PathBuf;
 
-    /// This is private for two reasons:
-    /// - to make [Entry] a struct, rather than an enum, so that we can use [mockall_derive::automock] on it. And
-    /// - to hide implementation details.
+    /// This is private, so as to hide the implementation (enum variants) and make it future-proof.
     #[derive(Debug)]
     enum EntryImpl {
         PrimaryOnly {
@@ -112,7 +109,7 @@ mod mockable {
     }
 
     /// Directory entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
-    //#[repr(transparent)]
+    #[repr(transparent)]
     #[derive(Debug)]
     pub struct Entry {
         entry_impl: EntryImpl,
@@ -234,7 +231,7 @@ mod mockable {
 
         pub(crate) fn and_writable_symlink(self, path: PathBuf) -> Self {
             // @TODO hash!!!!:
-            let write_name = self.name().clone().to_owned();
+            let write_name = self.name().to_owned();
 
             if let EntryImpl::PrimaryAndReadOnly { name } = self.entry_impl {
                 return Self::new(if path.is_symlink() {
