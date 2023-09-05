@@ -4,6 +4,7 @@ use const_format::formatcp;
 use std::io;
 
 mod entry;
+mod fs;
 mod server;
 
 /// Environment variable name that contains the port number assigned by Deta.Space.
