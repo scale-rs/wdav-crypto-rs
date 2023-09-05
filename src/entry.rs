@@ -1,4 +1,5 @@
 use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
+use mockall::automock;
 use std::collections::HashMap;
 use std::fs::{self, DirEntry};
 use std::io;
@@ -53,9 +54,11 @@ pub(crate) enum ReadAndOrWriteIncorrectKind {
     },
 }
 
-/// Dir entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
+/// This is private for two reasons:
+/// - to make [Entry] a struct, rather than an enum, so that we can use [mockall_derive::automock] on it. And
+/// - to hide implementation details.
 #[derive(Debug)]
-pub(crate) enum Entry {
+enum EntryImpl {
     PrimaryOnly {
         name: String,
     },
@@ -100,10 +103,20 @@ pub(crate) enum Entry {
        },*/
 }
 
+/// Directory entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
+#[repr(transparent)]
+#[derive(Debug)]
+pub(crate) struct Entry {
+    entry_impl: EntryImpl,
+}
+
 impl Entry {
+    fn new(entry_impl: EntryImpl) -> Self {
+        Self { entry_impl }
+    }
     pub(crate) fn is_ok_and_complete(&self) -> bool {
-        match self {
-            Self::PrimaryAndReadOnly { .. } | Self::PrimaryAndReadWrite { .. } => true,
+        match self.entry_impl {
+            EntryImpl::PrimaryAndReadOnly { .. } | EntryImpl::PrimaryAndReadWrite { .. } => true,
             _ => false,
         }
     }
@@ -111,21 +124,21 @@ impl Entry {
         self.is_ok_and_complete()
     }
     pub(crate) fn is_writable(&self) -> bool {
-        matches!(self, Self::PrimaryAndReadWrite { .. })
+        matches!(self.entry_impl, EntryImpl::PrimaryAndReadWrite { .. })
     }
     pub(crate) fn name(&self) -> &str {
-        match self {
-            Self::PrimaryOnly { name }
-            | Self::PrimaryAndReadOnly { name }
-            | Self::PrimaryAndReadWrite { name, .. }
-            | Self::PrimaryAndReadAndOrWriteIncorrect { name, .. }
-            | Self::PrimaryNonDir { name, .. }
-            | Self::SecondaryIncorrect { name, .. } => &name,
+        match &self.entry_impl {
+            EntryImpl::PrimaryOnly { name }
+            | EntryImpl::PrimaryAndReadOnly { name }
+            | EntryImpl::PrimaryAndReadWrite { name, .. }
+            | EntryImpl::PrimaryAndReadAndOrWriteIncorrect { name, .. }
+            | EntryImpl::PrimaryNonDir { name, .. }
+            | EntryImpl::SecondaryIncorrect { name, .. } => &name,
         }
     }
     pub(crate) fn write_name(&self) -> &str {
-        match self {
-            Self::PrimaryAndReadWrite {
+        match &self.entry_impl {
+            EntryImpl::PrimaryAndReadWrite {
                 name: _,
                 write_name: write,
             } => &write,
@@ -139,22 +152,22 @@ impl Entry {
     pub(crate) fn new_under_dirs(path: PathBuf) -> Self {
         let name = path.to_string_lossy().to_string();
         if path.is_dir() {
-            Self::PrimaryOnly { name }
+            Self::new(EntryImpl::PrimaryOnly { name })
         } else {
-            Self::PrimaryNonDir { name, path }
+            Self::new(EntryImpl::PrimaryNonDir { name, path })
         }
     }
 
     pub(crate) fn and_readable_symlink(self, path: PathBuf) -> Self {
-        if let Self::PrimaryOnly { name } = self {
-            return if path.is_symlink() {
+        if let EntryImpl::PrimaryOnly { name } = self.entry_impl {
+            return Self::new(if path.is_symlink() {
                 let target = read_link_full(&path);
                 if target == format!("{SYMLINKS_READ}/{name}") {
-                    Self::PrimaryAndReadOnly { name }
+                    EntryImpl::PrimaryAndReadOnly { name }
                 } else {
                     let is_orphan = !exists(&path);
 
-                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                    EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
                         kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
                             read: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
@@ -166,7 +179,7 @@ impl Entry {
                     }
                 }
             } else {
-                Self::PrimaryAndReadAndOrWriteIncorrect {
+                EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                     name,
                     kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadIncorrect {
                         read: SecondaryIncorrectKind::NonSymlink {
@@ -175,7 +188,7 @@ impl Entry {
                         write: None,
                     },
                 }
-            };
+            });
         }
         panic!(
             "Expected variant PrimaryOnly, but called on variant {:?}.",
@@ -186,22 +199,22 @@ impl Entry {
     fn _new_under_symlinks(path: &PathBuf, is_read: bool) -> Self {
         let name = file_name_leaf(path);
 
-        if path.is_symlink() {
+        Self::new(if path.is_symlink() {
             let target = read_link_full(path);
             let is_orphan = exists(path);
-            Self::SecondaryIncorrect {
+            EntryImpl::SecondaryIncorrect {
                 name,
                 is_read,
                 kind: SecondaryIncorrectKind::OrphanOrDifferentSymlink { target, is_orphan },
             }
         } else {
             let is_dir = path.is_dir();
-            Self::SecondaryIncorrect {
+            EntryImpl::SecondaryIncorrect {
                 name,
                 is_read,
                 kind: SecondaryIncorrectKind::NonSymlink { is_dir },
             }
-        }
+        })
     }
 
     pub(crate) fn new_under_readable_symlinks(path: &PathBuf) -> Self {
@@ -212,15 +225,15 @@ impl Entry {
         // @TODO hash!!!!:
         let write_name = self.name().clone().to_owned();
 
-        if let Self::PrimaryAndReadOnly { name } = self {
-            return if path.is_symlink() {
+        if let EntryImpl::PrimaryAndReadOnly { name } = self.entry_impl {
+            return Self::new(if path.is_symlink() {
                 let target = read_link_full(&path);
                 if target == format!("{SYMLINKS_WRITE}/{write_name}") {
-                    Self::PrimaryAndReadWrite { name, write_name }
+                    EntryImpl::PrimaryAndReadWrite { name, write_name }
                 } else {
                     let is_orphan = !exists(&path);
 
-                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                    EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
                         kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadOkButWriteIncorrect {
                             write: SecondaryIncorrectKind::OrphanOrDifferentSymlink {
@@ -232,7 +245,7 @@ impl Entry {
                     }
                 }
             } else {
-                Self::PrimaryAndReadAndOrWriteIncorrect {
+                EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                     name,
                     kind: ReadAndOrWriteIncorrectKind::PrimaryAndReadOkButWriteIncorrect {
                         write_name,
@@ -241,19 +254,19 @@ impl Entry {
                         },
                     },
                 }
-            };
-        } else if let Self::PrimaryOnly { name } = self {
-            return if path.is_symlink() {
+            });
+        } else if let EntryImpl::PrimaryOnly { name } = self.entry_impl {
+            return Self::new(if path.is_symlink() {
                 let target = read_link_full(&path);
                 if target == format!("{SYMLINKS_WRITE}/{write_name}") {
-                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                    EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
                         kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnly { write_name },
                     }
                 } else {
                     let is_orphan = !exists(&path);
 
-                    Self::PrimaryAndReadAndOrWriteIncorrect {
+                    EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                         name,
                         kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnlyAndIncorrect {
                             write_name,
@@ -265,7 +278,7 @@ impl Entry {
                     }
                 }
             } else {
-                Self::PrimaryAndReadAndOrWriteIncorrect {
+                EntryImpl::PrimaryAndReadAndOrWriteIncorrect {
                     name,
                     kind: ReadAndOrWriteIncorrectKind::PrimaryAndWriteOnlyAndIncorrect {
                         write_name,
@@ -274,7 +287,7 @@ impl Entry {
                         },
                     },
                 }
-            };
+            });
         }
         panic!(
             "Expected variant PrimaryAndReadOnly or PrimaryOnly, but called on variant {:?}.",
