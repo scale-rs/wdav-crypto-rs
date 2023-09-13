@@ -1,6 +1,10 @@
 #[cfg_attr(test, double)]
 pub(crate) use fs_mockable::FileSystem;
+//#[cfg(test)]
+//pub(crate) use fs_mockable::FileSystem as ProductionFileSystem;
+
 pub(crate) use fs_mockable::UnmockFileSystem;
+
 #[cfg(test)]
 use mockall_double::double;
 use std::path::Path;

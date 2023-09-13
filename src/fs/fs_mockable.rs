@@ -1,5 +1,5 @@
 use crate::entry::{EntriesMap, Entry};
-#[cfg(test)]
+#[cfg(not(test))]
 use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
 #[cfg(test)]
 use mockall::mock;
@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystem {}
 
+/// Functions that we implement for [FileSystem] but we don't neeed/want to mock them. Hence, we'll
+/// have same implementation for production (no mock) and for tests (mock).
 pub(crate) trait UnmockFileSystem {
     fn get_entries(&self) -> io::Result<EntriesMap>;
 }
@@ -96,7 +98,7 @@ mock! {
     }
 }
 
-mod Unmock {
+mod unmock {
     #[cfg_attr(test, double)]
     use super::FileSystem;
     use super::UnmockFileSystem;
