@@ -14,7 +14,8 @@ pub trait UnmockFileSystem {
     fn get_entries(&self) -> io::Result<EntriesMap>;
 }
 
-#[cfg(not(feature = "mock_fs"))]
+// #[cfg(not(feature = "mock_fs"))]
+#[cfg_attr(feature = "mock_fs", mockall::automock)]
 impl FileSystem {
     /// Return the target - but as-is, NOT canonical!
     ///
@@ -85,7 +86,7 @@ impl FileSystem {
     }
 }
 
-#[cfg(feature = "mock_fs")]
+/*#[cfg(feature = "mock_fs")]
 mockall::mock! {
     pub FileSystem {
         pub fn read_link_full(&self, path: &PathBuf) -> String;
@@ -94,7 +95,7 @@ mockall::mock! {
         pub fn get_secondaries_read(&self, mut primaries: EntriesMap) -> io::Result<EntriesMap>;
         fn get_secondaries_write(&self, mut secondaries_read: EntriesMap) -> io::Result<EntriesMap>;
     }
-}
+}*/
 
 mod unmock {
     #[cfg_attr(feature = "mock_fs", mockall_double::double)]

@@ -29,7 +29,7 @@ use warp::http::HeaderValue;
 use warp::reject;
 use warp::Reply;
 
- fn dav_config(
+fn dav_config(
     prefix_segment: impl core::fmt::Display,
     dir_path: impl AsRef<Path>,
     methods: DavMethodSet,
