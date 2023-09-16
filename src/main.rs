@@ -1,5 +1,5 @@
 use std::io;
-use tmpwdav_1_q0047082::server;
+use wdav_hash_rs::server;
 
 const _NOT_MOCKABLE: () = {
     #[cfg(feature = "mockable")]

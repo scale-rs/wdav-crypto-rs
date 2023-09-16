@@ -351,7 +351,7 @@ checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 name = "fs_mock_entry_real"
 version = "0.1.0"
 dependencies = [
- "tmpwdav-1-q0047082",
+ "wdav-hash-rs",
 ]
 
 [[package]]
@@ -1263,21 +1263,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "tmpwdav-1-q0047082"
-version = "0.0.1"
-dependencies = [
- "askama",
- "const_format",
- "dav-server",
- "env_logger",
- "http",
- "mockall",
- "mockall_double",
- "tokio",
- "warp",
-]
-
-[[package]]
 name = "tokio"
 version = "1.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1515,6 +1500,21 @@ name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
+
+[[package]]
+name = "wdav-hash-rs"
+version = "0.0.1"
+dependencies = [
+ "askama",
+ "const_format",
+ "dav-server",
+ "env_logger",
+ "http",
+ "mockall",
+ "mockall_double",
+ "tokio",
+ "warp",
+]
 
 [[package]]
 name = "winapi"
