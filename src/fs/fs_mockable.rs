@@ -1,7 +1,5 @@
 use crate::entry::{EntriesMap, Entry};
-#[cfg(not(feature = "mock_fs"))]
 use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
-#[cfg(not(feature = "mock_fs"))]
 use std::fs as std_fs;
 use std::io;
 use std::path::{Path, PathBuf};
