@@ -6,6 +6,13 @@ pub mod entry;
 pub mod fs;
 pub mod server;
 
+const _MOCKABLE_IN_DEBUG_ONLY: () = {
+    #[cfg(all(not(debug_assertions), feature = "mockable"))]
+    if true {
+        panic!("Use `mockable` (and related) feature only in debug build.");
+    }
+};
+
 /// Environment variable name that contains the port number assigned by Deta.Space.
 const ENV_PORT: &'static str = "PORT";
 const DEFAULT_PORT: &'static str = "8080";
