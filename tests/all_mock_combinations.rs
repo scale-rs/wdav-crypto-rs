@@ -1,45 +1,23 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 use std::error::Error;
+use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus, Output};
+use std::process::{Command, ExitStatus};
 use test_binary::TestBinary;
-
-#[repr(transparent)]
-#[derive(Debug)]
-struct DisplayableBytes {
-    bytes: Vec<u8>,
-}
-impl Display for DisplayableBytes {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        match std::str::from_utf8(&self.bytes) {
-            Ok(str) => str.fmt(f),
-            Err(_) => f.write_fmt(format_args!("{:?}", self.bytes)),
-        }
-    }
-}
 
 fn manifest_path_for_subdir(subdir: &str) -> PathBuf {
     PathBuf::from_iter(["testbins", subdir, "Cargo.toml"])
 }
 
+#[repr(transparent)]
 #[derive(thiserror::Error, Debug)]
-#[error("status:\n{status}\n\nstdout:\n{stdout}\n\nstderr:\n{stderr}")]
-struct LikeOutput {
+#[error("status:\n{status}")]
+struct LikeStatus {
     status: ExitStatus,
-    stdout: DisplayableBytes,
-    stderr: DisplayableBytes,
 }
-impl LikeOutput {
-    fn new(output: Output) -> Self {
-        Self {
-            status: output.status,
-            stdout: DisplayableBytes {
-                bytes: output.stdout,
-            },
-            stderr: DisplayableBytes {
-                bytes: output.stderr,
-            },
-        }
+impl LikeStatus {
+    fn new(status: ExitStatus) -> Self {
+        Self { status: status }
     }
 }
 
@@ -53,22 +31,22 @@ fn run_main_under_subdir(subdir: &str) -> Result<(), Box<dyn Error>> {
             let output = Command::new(path).output();
             match output {
                 Ok(output) => {
+                    // If we have both non-empty stdout and stderr, print stdout first and stderr
+                    // second. That way the developer is more likely to notice (and there is less to
+                    // scroll up).
+                    let mut stdout = io::stdout().lock();
+                    stdout.write_all(&output.stdout)?;
+                    stdout.flush()?;
+
                     if output.status.success() && output.stderr.is_empty() {
-                        println!(
-                            "{}",
-                            DisplayableBytes {
-                                bytes: output.stdout
-                            }
-                        );
-                        println!(
-                            "{}",
-                            DisplayableBytes {
-                                bytes: output.stderr
-                            }
-                        );
                         Ok(())
                     } else {
-                        Err(Box::new(LikeOutput::new(output)))
+                        if !output.stderr.is_empty() {
+                            let mut stderr = io::stderr().lock();
+                            stderr.write_all(&output.stderr)?;
+                            stderr.flush()?;
+                        }
+                        Err(Box::new(LikeStatus::new(output.status)))
                     }
                 }
                 Err(e) => Err(Box::new(e)),
