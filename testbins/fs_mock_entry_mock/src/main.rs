@@ -1,3 +1,3 @@
 fn main() {
-    println!("Hello, world!");
+    println!("fs_mock_entry_mock completed.");
 }
