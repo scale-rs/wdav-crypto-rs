@@ -1,8 +1,6 @@
 use super::{ReadAndOrWriteIncorrectKind, SecondaryIncorrectKind};
 use crate::fs::FileSystem;
 use crate::{SYMLINKS_READ, SYMLINKS_WRITE};
-#[cfg(test)]
-use mockall::automock;
 use std::path::PathBuf;
 
 /// Directory entry immediately below either [DIRS], and/or [SYMLINKS_READ] and/or [SYMLINKS_WRITE].
@@ -54,21 +52,21 @@ pub enum Entry {
 
 // Can't use `#[cfg_attr(test, automock)]`, because when `fs::fs_mockable` calls
 // `and_readable_symlink`, it would pass `FileSystem` instead of `MockFileSystem`.
-#[cfg_attr(test, automock)]
+#[cfg_attr(feature = "mock_entry", mockall::automock)]
 impl Entry {
-    pub(crate) fn is_ok_and_complete(&self) -> bool {
+    pub fn is_ok_and_complete(&self) -> bool {
         match self {
             Self::PrimaryAndReadOnly { .. } | Self::PrimaryAndReadWrite { .. } => true,
             _ => false,
         }
     }
-    pub(crate) fn is_readable(&self) -> bool {
+    pub fn is_readable(&self) -> bool {
         self.is_ok_and_complete()
     }
-    pub(crate) fn is_writable(&self) -> bool {
+    pub fn is_writable(&self) -> bool {
         matches!(self, Self::PrimaryAndReadWrite { .. })
     }
-    pub(crate) fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         match &self {
             Self::PrimaryOnly { name }
             | Self::PrimaryAndReadOnly { name }
@@ -78,7 +76,7 @@ impl Entry {
             | Self::SecondaryIncorrect { name, .. } => &name,
         }
     }
-    pub(crate) fn write_name(&self) -> &str {
+    pub fn write_name(&self) -> &str {
         match &self {
             Self::PrimaryAndReadWrite {
                 name: _,
@@ -91,7 +89,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn new_under_dirs(path: PathBuf) -> Self {
+    pub fn new_under_dirs(path: PathBuf) -> Self {
         let name = path.to_string_lossy().to_string();
         if path.is_dir() {
             Self::PrimaryOnly { name }
@@ -100,7 +98,7 @@ impl Entry {
         }
     }
 
-    pub(crate) fn and_readable_symlink(self, fs: &FileSystem, path: PathBuf) -> Self {
+    pub fn and_readable_symlink(self, fs: &FileSystem, path: PathBuf) -> Self {
         if let Self::PrimaryOnly { name } = self {
             return if path.is_symlink() {
                 let target = fs.read_link_full(&path);
@@ -159,12 +157,12 @@ impl Entry {
         }
     }
 
-    pub(crate) fn new_under_readable_symlinks(path: &PathBuf) -> Self {
+    pub fn new_under_readable_symlinks(path: &PathBuf) -> Self {
         let fs = loop {};
         Self::_new_under_symlinks(path, &fs, true)
     }
 
-    pub(crate) fn and_writable_symlink(self, path: PathBuf) -> Self {
+    pub fn and_writable_symlink(self, path: PathBuf) -> Self {
         let fs: FileSystem = loop {};
         // @TODO hash!!!!:
         let write_name = self.name().to_owned();
@@ -239,7 +237,7 @@ impl Entry {
         );
     }
 
-    pub(crate) fn new_under_writable_symlinks(path: &PathBuf) -> Self {
+    pub fn new_under_writable_symlinks(path: &PathBuf) -> Self {
         let fs = loop {};
         Self::_new_under_symlinks(path, &fs, false)
     }

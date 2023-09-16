@@ -1,8 +1,6 @@
 use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
-#[cfg_attr(test, double)]
+#[cfg_attr(feature = "mock_entry", mockall_double::double)]
 pub use entry_mockable::Entry;
-#[cfg(test)]
-use mockall_double::double;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -20,18 +18,18 @@ fn file_name_leaf(path: &Path) -> String {
 }
 
 #[derive(Debug)]
-pub(crate) enum SecondaryIncorrectKind {
+pub enum SecondaryIncorrectKind {
     OrphanOrDifferentSymlink { target: String, is_orphan: bool },
     NonSymlink { is_dir: bool },
 }
 
-pub(crate) type WriteNameAndKind = (
+pub type WriteNameAndKind = (
     String, /*write_name*/
     Result<(), SecondaryIncorrectKind>,
 );
 
 #[derive(Debug)]
-pub(crate) enum ReadAndOrWriteIncorrectKind {
+pub enum ReadAndOrWriteIncorrectKind {
     PrimaryAndReadIncorrect {
         read: SecondaryIncorrectKind,
         write: Option<WriteNameAndKind>,
@@ -49,4 +47,4 @@ pub(crate) enum ReadAndOrWriteIncorrectKind {
     },
 }
 
-pub(crate) type EntriesMap = HashMap<String, Entry>;
+pub type EntriesMap = HashMap<String, Entry>;

@@ -1,9 +1,12 @@
 /target
+/testbins/*/target
 
 .idea/
 *.iml
 
 # Do allow versioning of .vscode/ directory itself, if we want to version some example files.
 .vscode/settings.json
+/testbins/*/.vscode/settings.json
+.fleet/run.json
 
 .space

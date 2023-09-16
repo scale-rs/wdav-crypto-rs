@@ -1,40 +1,38 @@
 use crate::entry::{EntriesMap, Entry};
-#[cfg(not(test))]
+#[cfg(not(feature = "mock_fs"))]
 use crate::{DIRS, SYMLINKS_READ, SYMLINKS_WRITE};
-#[cfg(test)]
-use mockall::mock;
+#[cfg(not(feature = "mock_fs"))]
 use std::fs as std_fs;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub(crate) struct FileSystem {}
+pub struct FileSystem {}
 
 /// Functions that we implement for [FileSystem] but we don't neeed/want to mock them. Hence, we'll
 /// have same implementation for production (no mock) and for tests (mock).
-pub(crate) trait UnmockFileSystem {
+pub trait UnmockFileSystem {
     fn get_entries(&self) -> io::Result<EntriesMap>;
 }
 
-#[cfg(not(test))]
+#[cfg(not(feature = "mock_fs"))]
 impl FileSystem {
     /// Return the target - but as-is, NOT canonical!
     ///
     /// This function could be generic, like `read_link_full<P: AsRef<Path>>(path: P)`. However,
     /// https://docs.rs/mockall/latest/mockall/#generic-methods would then require the generic type
     /// to be `'static`!
-    pub(crate) fn read_link_full(&self, path: &PathBuf) -> String {
-        let link = fs::read_link(path).expect("Expecting {path} to be a symlink.");
+    pub fn read_link_full(&self, path: &PathBuf) -> String {
+        let link = std_fs::read_link(path).expect("Expecting {path} to be a symlink.");
         link.as_os_str().to_string_lossy().to_string()
     }
 
-    pub(crate) fn exists(&self, path: &Path) -> bool {
+    pub fn exists(&self, path: &Path) -> bool {
         let target_exists = path.try_exists();
         matches!(target_exists, Ok(true))
     }
 
-    pub(crate) fn get_primaries(&self) -> io::Result<EntriesMap> {
-        let dirs = fs::read_dir(DIRS)?;
+    pub fn get_primaries(&self) -> io::Result<EntriesMap> {
+        let dirs = std_fs::read_dir(DIRS)?;
 
         let mut entries = EntriesMap::new();
         for dir_entry in dirs {
@@ -45,8 +43,8 @@ impl FileSystem {
     }
 
     /// Call on result of [get_primaries].
-    pub(crate) fn get_secondaries_read(&self, mut primaries: EntriesMap) -> io::Result<EntriesMap> {
-        let secondaries = fs::read_dir(SYMLINKS_READ)?;
+    pub fn get_secondaries_read(&self, mut primaries: EntriesMap) -> io::Result<EntriesMap> {
+        let secondaries = std_fs::read_dir(SYMLINKS_READ)?;
         let mut entries = EntriesMap::new();
 
         for secondary in secondaries {
@@ -67,7 +65,7 @@ impl FileSystem {
 
     /// Call on result of [get_secondaries_read].
     fn get_secondaries_write(&self, mut secondaries_read: EntriesMap) -> io::Result<EntriesMap> {
-        let secondaries_write = fs::read_dir(SYMLINKS_WRITE)?;
+        let secondaries_write = std_fs::read_dir(SYMLINKS_WRITE)?;
         let mut entries = EntriesMap::new();
 
         for secondary_write in secondaries_write {
@@ -87,24 +85,23 @@ impl FileSystem {
     }
 }
 
-#[cfg(test)]
-mock! {
-    pub(crate) FileSystem {
-        pub(crate) fn read_link_full(&self, path: &PathBuf) -> String;
-        pub(crate) fn exists(&self, path: &Path) -> bool;
-        pub(crate) fn get_primaries(&self) -> io::Result<EntriesMap>;
-        pub(crate) fn get_secondaries_read(&self, mut primaries: EntriesMap) -> io::Result<EntriesMap>;
+#[cfg(feature = "mock_fs")]
+mockall::mock! {
+    pub FileSystem {
+        pub fn read_link_full(&self, path: &PathBuf) -> String;
+        pub fn exists(&self, path: &Path) -> bool;
+        pub fn get_primaries(&self) -> io::Result<EntriesMap>;
+        pub fn get_secondaries_read(&self, mut primaries: EntriesMap) -> io::Result<EntriesMap>;
         fn get_secondaries_write(&self, mut secondaries_read: EntriesMap) -> io::Result<EntriesMap>;
     }
 }
 
 mod unmock {
-    #[cfg_attr(test, double)]
+    #[cfg_attr(feature = "mock_fs", mockall_double::double)]
     use super::FileSystem;
+
     use super::UnmockFileSystem;
     use crate::entry::EntriesMap;
-    #[cfg(test)]
-    use mockall_double::double;
     use std::io;
 
     impl UnmockFileSystem for FileSystem {

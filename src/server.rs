@@ -29,7 +29,7 @@ use warp::http::HeaderValue;
 use warp::reject;
 use warp::Reply;
 
-pub(crate) fn dav_config(
+ fn dav_config(
     prefix_segment: impl core::fmt::Display,
     dir_path: impl AsRef<Path>,
     methods: DavMethodSet,
@@ -57,7 +57,7 @@ pub(crate) fn dav_config(
 }
 
 #[derive(Debug)]
-pub(crate) struct Rej<T>(T)
+pub struct Rej<T>(T)
 where
     T: Debug + Sized + Send + Sync;
 
@@ -67,7 +67,7 @@ unsafe impl<T> Sync for Rej<T> where T: Debug + Sized + Send + Sync {}
 
 impl<T> Reject for Rej<T> where T: Debug + Sized + Send + Sync + 'static {}
 
-pub(crate) fn redirect_see_other<L>(location: L) -> Result<impl Reply, Rejection>
+pub fn redirect_see_other<L>(location: L) -> Result<impl Reply, Rejection>
 where
     HeaderValue: TryFrom<L>,
     <HeaderValue as TryFrom<L>>::Error: Into<http::Error>,
@@ -90,14 +90,14 @@ where
 /// Directory entries, mapped by their (potentially lossy) names.
 #[derive(Template)]
 #[template(path = "admin_list.html")]
-pub(crate) struct AdminListTemplate {
-    pub(crate) entries: HashMap<String, Entry>,
+pub struct AdminListTemplate {
+    pub entries: HashMap<String, Entry>,
 }
 
 // Thanks to https://blog.logrocket.com/template-rendering-in-rust
-pub(crate) type WebResult<T> = std::result::Result<T, Rejection>;
+pub type WebResult<T> = std::result::Result<T, Rejection>;
 
-pub(crate) async fn admin_list() -> WebResult<impl Reply> {
+pub async fn admin_list() -> WebResult<impl Reply> {
     let fs: FileSystem = loop {};
     let entries = fs.get_entries().map_err(|e| reject::custom(Rej(e)))?;
 
@@ -106,7 +106,7 @@ pub(crate) async fn admin_list() -> WebResult<impl Reply> {
     Ok(reply::html(res))
 }
 
-pub(crate) async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection> {
+pub async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection> {
     let dir_result = fs::create_dir(format!("{DIRS}/{dir_name}"));
     if let Err(e) = dir_result {
         return Err(reject::custom(Rej(e)));
@@ -117,7 +117,7 @@ pub(crate) async fn admin_add(dir_name: String) -> Result<impl Reply, Rejection>
     ))
 }
 
-pub(crate) async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
+pub async fn admin_remove_write(dir_name: String) -> Result<impl Reply, Rejection> {
     let dir_result = fs::create_dir(format!("{DIRS}/{dir_name}"));
     if let Err(e) = dir_result {
         return Err(reject::custom(Rej(e)));
@@ -126,7 +126,7 @@ pub(crate) async fn admin_remove_write(dir_name: String) -> Result<impl Reply, R
     redirect_see_other(format!("/{ADMIN}"))
 }
 
-pub(crate) async fn main() -> io::Result<()> {
+pub async fn main() -> io::Result<()> {
     let port = env::var(ENV_PORT).unwrap_or(DEFAULT_PORT.to_string());
     let port = port.parse::<u16>().unwrap();
 
