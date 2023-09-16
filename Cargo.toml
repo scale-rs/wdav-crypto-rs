@@ -8,9 +8,9 @@ repository = "https://github.com/scale-rs/tmpwdav-1-q0047082.deta.app"
 homepage = "https://tmpwdav-1-q0047082.deta.app"
 
 [features]
-mockable = []
-mock_fs = ["mockable", "dep:mockall", "dep:mockall_double"]
-mock_entry = ["mockable", "dep:mockall"]
+mockable = ["dep:mockall"]
+mock_fs = ["mockable", "dep:mockall_double"]
+mock_entry = ["mockable"]
 
 
 [dependencies]
@@ -26,6 +26,7 @@ mockall_double = { version = "0.3.0", optional = true }
 
 [dev-dependencies]
 test-binary = "3.0.1"
+thiserror = "1.0.48"
 #[[test.fs_mock_entry_mock.dependencies]]
 #name = "fs_mock_entry_mock"
 #dependencies.tmpwdav-1-q0047082 = {features = ["fs_mock", "entry_mock"]}

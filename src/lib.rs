@@ -8,9 +8,12 @@ pub mod server;
 
 const _MOCKABLE_IN_DEBUG_ONLY: () = {
     #[cfg(all(not(debug_assertions), feature = "mockable"))]
-    if true {
-        panic!("Use `mockable` (and related) feature only in debug build.");
-    }
+    panic!("Use `mockable` (and related features) only in debug build.");
+};
+
+const _MOCKABLE_NOT_IN_DIRECT_TEST: () = {
+    #[cfg(all(test, feature = "mockable"))]
+    panic!("Use `mockable` (and related features) only in non-test build. (Don't invoke that directly, but as a non-test debug build through `test-binary`.");
 };
 
 /// Environment variable name that contains the port number assigned by Deta.Space.
