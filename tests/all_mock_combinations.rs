@@ -26,6 +26,10 @@ fn run_main_under_subdir(subdir: &str) -> Result<(), Box<dyn Error>> {
     // Even though the binary source is in `main.rs`, the executable will be called the same as its
     // crate (and as its project folder) - as given in `subdir`.
     let mut binary = TestBinary::relative_to_parent(subdir, &manifest_path);
+    // @TODO if we don't paralellize the tested feature combinations fully, then apply
+    // .with_feature(...) once per feature; re-build in the same folder (per the same
+    // channel/sequence of run, but stop on the first error (or warning), unless configured
+    // otherwise.
     match binary.with_profile("dev").build() {
         Ok(path) => {
             let output = Command::new(path).output();
