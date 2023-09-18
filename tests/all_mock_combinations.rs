@@ -1,4 +1,3 @@
-use core::fmt::{Display, Formatter, Result as FmtResult};
 use std::error::Error;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -12,10 +11,10 @@ fn manifest_path_for_subdir(subdir: &str) -> PathBuf {
 #[repr(transparent)]
 #[derive(thiserror::Error, Debug)]
 #[error("status:\n{status}")]
-struct LikeStatus {
+struct ExitStatusWrapped {
     status: ExitStatus,
 }
-impl LikeStatus {
+impl ExitStatusWrapped {
     fn new(status: ExitStatus) -> Self {
         Self { status: status }
     }
@@ -50,7 +49,7 @@ fn run_main_under_subdir(subdir: &str) -> Result<(), Box<dyn Error>> {
                             stderr.write_all(&output.stderr)?;
                             stderr.flush()?;
                         }
-                        Err(Box::new(LikeStatus::new(output.status)))
+                        Err(Box::new(ExitStatusWrapped::new(output.status)))
                     }
                 }
                 Err(e) => Err(Box::new(e)),
