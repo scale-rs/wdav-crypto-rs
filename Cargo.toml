@@ -1,5 +1,5 @@
 [package]
-name = "wdav-hash-rs"
+name = "wdav-crypt-rs"
 version = "0.0.1"
 edition = "2021"
 description = "WebDAV server with read-only and writable symlinks"
