@@ -31,7 +31,9 @@ fn run_main_under_subdir(subdir: &str) -> Result<(), Box<dyn Error>> {
     // otherwise.
     match binary.with_profile("dev").build() {
         Ok(path) => {
-            let output = Command::new(path).output();
+            let mut command = Command::new(path);
+            command.env("RUST_TEST_TIME_INTEGRATION", "3600000");
+            let output = command.output();
             match output {
                 Ok(output) => {
                     // If we have both non-empty stdout and stderr, print stdout first and stderr
@@ -60,7 +62,7 @@ fn run_main_under_subdir(subdir: &str) -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-pub fn all_mock_combinations() -> Result<(), Box<dyn Error>> {
+pub fn run_all_mock_combinations() -> Result<(), Box<dyn Error>> {
     run_main_under_subdir("fs_mock_entry_mock")?;
     run_main_under_subdir("fs_mock_entry_real")?;
     Ok(())

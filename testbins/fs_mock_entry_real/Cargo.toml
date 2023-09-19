@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wdav-hash-rs = { path = "../.." , features = ["mock_fs"] }
+wdav-crypto-rs = { path = "../.." , features = ["mock_fs"] }
 
 # Empty [workspace] section as per https://gitlab.com/rust-test-binary/test-binary/#note
 [workspace]

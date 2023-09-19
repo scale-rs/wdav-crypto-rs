@@ -28,3 +28,8 @@ You can use applications that support WebDav to access files on the current devi
 Such as [GNOME Files application](docs/clients.md#gnome-files-application),
 [Firefox](docs/clients.md#Firefox), [Floccus](docs/clients.md#Floccus), [Floccus with uBlock
 Origin](docs/clients.md#Floccus-with-uBlock-Origin).
+
+## Tests
+
+Unfortunately, it seems that Rust [doesn't allow us to override this
+default](https://github.com/rust-lang/rust/blob/41bafc4ff3eb6a73aa40e60c3bd4494302c7ec57/library/test/src/time.rs#L61).
