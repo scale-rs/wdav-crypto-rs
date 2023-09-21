@@ -166,11 +166,16 @@ fn run_subdirs<S: AsRef<str>>(
                 let mut stdout = io::stdout().lock();
                 let mut stderr = io::stderr().lock();
 
-                let mut child_out = child.stdout.unwrap();
-                let mut child_err = child.stderr.unwrap();
-
-                copy_all_bytes(&mut stdout, &mut child_out)?;
-                let err_len = copy_all_bytes(&mut stderr, &mut child_err)?;
+                //let mut child_out = child.stdout.unwrap();
+                //let mut child_err = child.stderr.unwrap();
+                if let Some(mut child_out) = child.stdout {
+                    copy_all_bytes(&mut stdout, &mut child_out)?;
+                }
+                let err_len = if let Some(mut child_err) = child.stderr {
+                    copy_all_bytes(&mut stderr, &mut child_err)?
+                } else {
+                    0
+                };
 
                 if status.success() && err_len == 0 {
                     break Ok(());
