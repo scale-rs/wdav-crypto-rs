@@ -38,11 +38,18 @@ impl ExitStatusWrapped {
     }
 }
 
-pub enum BinaryCrate<O: Borrow<str>> {
+pub enum BinaryCrateName<O: Borrow<str>> {
+    /// The binary name is the same as `[package]` name in `Cargo.toml`. (That's the default binary
+    /// crate, and its source code is (by default) in `src/main.rs`.)
     Main,
+    /// Non-default binary name, whose source code is (by default) under
+    /// [`src/bin/`](https://doc.rust-lang.org/nightly/cargo/reference/cargo-targets.html#binaries).
+    /// The binary (executable) name is (by
+    /// [auto-discovery](https://doc.rust-lang.org/nightly/cargo/reference/cargo-targets.html#target-auto-discovery))
+    /// same as its source file name (excluding `.rs`; add `.exe` on Windows).
     Other(O),
 }
-impl<O: Borrow<str>> BinaryCrate<O> {
+impl<O: Borrow<str>> BinaryCrateName<O> {
     fn borrow(&self) -> &str {
         match self {
             Self::Main => "main",
@@ -56,7 +63,9 @@ type DynErrResult<T> = Result<T, DynErr>;
 
 fn spawn_main_under_subdir(
     parent_dir: &str,
-    sub_dir: &str, /*, features: impl IntoIterator<Item = F>*/
+    sub_dir: &str,
+    // TODO:
+    /*, features: impl IntoIterator<Item = F>*/
 ) -> DynErrResult<Child> {
     let manifest_path = manifest_path_for_subdir(parent_dir, sub_dir);
     // Even though the binary source is in `main.rs`, the executable will be called the same as its
@@ -175,7 +184,7 @@ pub enum ExecutionEnd {
 }
 
 /// Mode of handling task life cycle.
-pub enum TaskSpawning {
+pub enum SpawningMode {
     /// Default (until there is any error, or until we finish all tasks).
     ProcessAll,
     /// Finish active tasks, collect their output. Don't start any new ones.
@@ -272,7 +281,7 @@ fn group_start<
     parent_dir: PARENT_DIR,
     tasks: PARALLEL_TASKS,
     until: ExecutionEnd,
-) -> (GroupOfChildren, TaskSpawning)
+) -> (GroupOfChildren, SpawningMode)
 where
     PARENT_DIR: Borrow<str>,
     SUB_DIR: Borrow<str>,
@@ -280,6 +289,14 @@ where
     FEATURE_SET: IntoIterator<Item = FEATURE>,
     PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
 {
+    panic!()
+}
+
+fn group_life_cycle_step(
+    group: GroupOfChildren,
+    mode: SpawningMode,
+    until: ExecutionEnd,
+) -> (GroupOfChildren, SpawningMode) {
     panic!()
 }
 
