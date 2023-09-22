@@ -1,7 +1,7 @@
 #![feature(can_vector, read_buf, write_all_vectored)]
 //! Any `S` generic parameter is for [String]/[str] slice-like type, used for accepting names of
 //! directories, files/binary crates, features...
-//! 
+//!
 //! Any `B` generic parameter is for [BinaryCrateName]. That's separate from `S` because of
 //! lifetimes and borrowing.
 
@@ -46,7 +46,6 @@ impl ExitStatusWrapped {
 }
 
 pub enum BinaryCrateName<'b, B>
-//where S: Borrow<str> + 's + ?Sized {
 where
     B: 'b + ?Sized,
     &'b B: Borrow<str>,
@@ -64,7 +63,6 @@ where
     Other(&'b B),
 }
 impl<'b, B> BinaryCrateName<'b, B>
-//where S: Borrow<str> + 's + ?Sized {
 where
     B: 'b + ?Sized,
     &'b B: Borrow<str>,
@@ -72,8 +70,7 @@ where
     fn borrow(&self) -> &str {
         match self {
             Self::Main => "main",
-            // <**o as Borrow::<str>>::borrow()
-            Self::Other(o) => o.borrow(), //**o.borrow(),
+            Self::Other(o) => o.borrow(),
         }
     }
 }
@@ -83,37 +80,45 @@ fn bb(b: BinaryCrateName<str>) {}
 type DynErr = Box<dyn Error>;
 type DynErrResult<T> = Result<T, DynErr>;
 
-fn spawn_main_under_subdir<'b, S, B>(
+fn spawn_main_under_subdir<'s, 'b, S, B>(
     parent_dir: &S,
     sub_dir: &S,
-    binary_crate: &BinaryCrateName<'b, B>, // TODO:
-                                           /*, features: impl IntoIterator<Item = F>*/
+    binary_crate: &BinaryCrateName<'b, B>,
+    features: impl IntoIterator<Item = &'s S>,
 ) -> DynErrResult<Child>
 where
-    S: Borrow<str> + ?Sized,
+    S: Borrow<str> + 's + ?Sized,
     B: 'b + ?Sized,
     &'b B: Borrow<str>,
 {
     let manifest_path = manifest_path_for_subdir(parent_dir, sub_dir);
-    // Even though the binary source is in `main.rs`, the executable will be called the same as its
-    // crate (and as its project folder) - as given in `subdir`.
-    let mut binary = TestBinary::relative_to_parent(binary_crate.borrow(), &manifest_path);
+    let binary_crate = binary_crate.borrow();
+    let mut binary = TestBinary::relative_to_parent(binary_crate, &manifest_path);
+    binary.with_profile("dev");
+    for feature in features {
+        binary.with_feature(feature.borrow());
+    }
     // @TODO if we don't paralellize the tested feature combinations fully, then apply
     // .with_feature(...) once per feature; re-build in the same folder (per the same
     // channel/sequence of run, but stop on the first error (or warning), unless configured
     // otherwise.
-    match binary.with_profile("dev").build() {
+    match binary.build() {
         Ok(path) => {
             let mut command = Command::new(path);
-            command.env("RUST_TEST_TIME_INTEGRATION", "3600000");
-            println!("Starting a process for {}.", sub_dir.borrow());
+            //command.env("RUST_TEST_TIME_INTEGRATION", "3600000");
+            println!(
+                "Starting a process under {}/ binary crate {}.",
+                sub_dir.borrow(),
+                binary_crate
+            );
             return Ok(command.spawn()?);
         }
         Err(e) => Err(Box::new(e)),
     }
 }
 
-/// NOT a (transparent) single item struct, because we don't use [u32] for anything else here.
+/// Result of [Child]'s `id()` method. NOT a (transparent) single item struct, because we don't use
+/// [u32] for anything else here.
 type ChildId = u32;
 
 /// NOT [std::collections::HashSet], because that doesn't allow mutable access to items (otherwise
@@ -121,16 +126,15 @@ type ChildId = u32;
 ///
 /// Keys are results of [Child]'s `id()` method.
 ///
-/// We could use [Vec], but child get removed incrementally => O(n^2).
+/// We could use [Vec], but child processes get removed incrementally => O(n^2).
 type GroupOfChildren = HashMap<ChildId, Child>;
 
 /// Iterate over the given children max. once. Take the first finished child (if any), and return
 /// its process ID and exit status.
 ///
-/// The [u8] part of the `Ok(Some((u8,ExitStatus)))` variant is child process ID of the finished
-/// process.
+/// The [ChildId] is child process ID of the finished process.
 ///
-/// [Ok] of [Some] CAN contain [ExitStatus] _NOT_ being OK!
+/// Beware: [Ok] of [Some] CAN contain [ExitStatus] _NOT_ being OK!
 fn finished_child(children: &mut GroupOfChildren) -> DynErrResult<Option<(ChildId, ExitStatus)>> {
     for (child_id, child) in children.iter_mut() {
         let opt_status_or_err = child.try_wait();
@@ -210,15 +214,45 @@ pub enum ExecutionEnd {
     ProcessAll,
 }
 
+impl ExecutionEnd {
+    pub fn after_errors(&self, errors: Vec<DynErr>) -> SpawningModeAndErrors {
+        panic!()
+    }
+}
+
 /// Mode of handling task life cycle.
 pub enum SpawningMode {
     /// Default (until there is any error, or until we finish all tasks).
     ProcessAll,
     /// Finish active tasks, collect their output. Don't start any new ones.
-    FinishActive(Vec<DynErr>),
+    FinishActive,
     /// Stop any and all active tasks. Ignore their output (except for the task that has failed and
     /// that triggered this mode).
-    StopAll(Vec<DynErr>),
+    StopAll,
+}
+
+pub struct SpawningModeAndErrors {
+    pub mode: SpawningMode,
+    pub errors: Vec<DynErr>,
+}
+
+impl SpawningModeAndErrors {
+    pub fn after_error(self, until: ExecutionEnd, err: DynErr) -> Self {
+        match (&self, &until) {
+            (
+                Self {
+                    mode: SpawningMode::ProcessAll,
+                    errors: _,
+                },
+                _,
+            ) => {
+                panic!()
+            }
+            (_, _) => {
+                panic!()
+            }
+        }
+    }
 }
 
 /// Run a group of parallel binary crate invocations. Each item (a tuple) of the group consists of
@@ -284,29 +318,63 @@ pub fn run_parallel_sequences_of_parallel_tasks<
 {
 }
 
+/// Start a number of parallel child process(es) - tasks, all under the same `parent_dir`.
+///
+/// This does NOT have a [SpawningMode] parameter - we behave as if under
+/// [SpawningMode::ProcessAll].
+///
+/// This does NOT check for exit status/stderr of any spawn child processes. It only checks if the
+/// actual spawning itself (system call) was successful. If all spawn successfully, then the
+/// [SpawningMode] of the result tuple is [SpawningMode::ProcessAll]. Otherwise the [SpawningMode]
+/// part of the result tuple is either [SpawningMode::FinishActive] or [SpawningMode::StopAll],
+/// depending on the given `until` ([ExecutionEnd]).
 fn group_start<
     's,
+    'b,
     S,
+    B,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] PARALLEL_TASKS,
 >(
     parent_dir: &S,
     tasks: PARALLEL_TASKS,
     until: ExecutionEnd,
-) -> (GroupOfChildren, SpawningMode)
+) -> DynErrResult<(GroupOfChildren, SpawningModeAndErrors)>
 where
     S: Borrow<str> + 's + ?Sized,
+    B: 'b + ?Sized,
+    &'b B: Borrow<str>,
     FEATURE_SET: IntoIterator<Item = &'s S /* feature */>,
-    PARALLEL_TASKS: IntoIterator<Item = (&'s S /* binary crate name */, FEATURE_SET)>,
+    PARALLEL_TASKS: IntoIterator<
+        Item = (
+            &'s S, /* sub_dir */
+            &'b BinaryCrateName<'b, B>,
+            FEATURE_SET,
+        ),
+    >,
 {
+    let mut children = GroupOfChildren::new();
+    for (sub_dir, binary_crate, features) in tasks {
+        let child_or_err = spawn_main_under_subdir(parent_dir, sub_dir, binary_crate, features);
+
+        match child_or_err {
+            Ok(child) => children.insert(child.id(), child),
+            Err(err) => {
+                for (_, mut other_child) in children {
+                    let _ = other_child.kill();
+                }
+                return Err(err);
+            }
+        };
+    }
     panic!()
 }
 
 fn group_life_cycle_step(
     group: GroupOfChildren,
-    mode: SpawningMode,
+    mode: SpawningModeAndErrors,
     until: ExecutionEnd,
-) -> (GroupOfChildren, SpawningMode) {
+) -> (GroupOfChildren, SpawningModeAndErrors) {
     panic!()
 }
 
@@ -322,7 +390,7 @@ where
 {
     let mut children = GroupOfChildren::new();
     for sub_dir in sub_dirs {
-        let child_or_err = spawn_main_under_subdir(parent_dir, &sub_dir, &binary_crate);
+        let child_or_err = spawn_main_under_subdir(parent_dir, &sub_dir, &binary_crate, []);
 
         match child_or_err {
             Ok(child) => children.insert(child.id(), child),
