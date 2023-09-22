@@ -1,6 +1,7 @@
 #![feature(can_vector, read_buf, write_all_vectored)]
 
 use core::time::Duration;
+use http::header::IntoIter;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, IoSlice, IoSliceMut, Read, Result as IoResult, Write};
@@ -9,6 +10,8 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdout, Command, ExitStatus};
 use std::thread;
 use test_binary::TestBinary;
+
+const INTERMEDIARY_DIR: &'static str = "testbins";
 
 /// Based on
 /// https://www.baeldung.com/linux/pipe-buffer-capacity#:~:text=In%20Linux%2C%20pipe%20buffer%20capacity,page%20size%20of%204%2C096%20bytes)
@@ -36,7 +39,10 @@ impl ExitStatusWrapped {
 
 type DynErrResult<T> = Result<T, Box<dyn Error>>;
 
-fn spawn_main_under_subdir(parent_dir: &str, sub_dir: &str) -> DynErrResult<Child> {
+fn spawn_main_under_subdir(
+    parent_dir: &str,
+    sub_dir: &str, /*, features: impl IntoIterator<Item = F>*/
+) -> DynErrResult<Child> {
     let manifest_path = manifest_path_for_subdir(parent_dir, sub_dir);
     // Even though the binary source is in `main.rs`, the executable will be called the same as its
     // crate (and as its project folder) - as given in `subdir`.
@@ -136,10 +142,80 @@ fn copy_all_bytes(out: &mut impl Write, inp: &mut impl Read) -> IoResult<usize> 
     }
 }
 
-fn run_subdirs<S: AsRef<str>>(
+/// Indicate when to end an execution of parallel runs in the same batch, or a sequence of batches.
+pub enum ExecutionEnd {
+    /// Stop the current batch on first failure. Kill any other parallel runs, without reporting any
+    /// output from them. Don't start any subsequent batch(es).
+    OnFirstFailure,
+    /// On failure of any runs that have already started, wait until all other parallel runs finish,
+    /// too. Report output from all of them. However, don't start any subsequent runs.
+    FinishBatch,
+    /// Run all batch(es) and all runs in each batch. Wait for all of them, even if any of them
+    /// fails.
+    FinishAll,
+}
+
+/// Run a batch of parallel binary crate invocations. Each item (a tuple) of the `batch` consists of
+/// two fields:
+/// - subdirectory, and
+/// - crate feature name(s), if any.
+///
+/// All entries are run in parallel. It's an error if two or more entries have the same subdirectory
+/// name.
+pub fn run_parallel_single_tasks<SUBDIR, FEATURE, FEATURES>(
     parent_dir: &str,
-    sub_dirs: impl IntoIterator<Item = S>,
-) -> DynErrResult<()> {
+    tasks: impl IntoIterator<Item = (SUBDIR, FEATURES)>,
+) where
+    SUBDIR: AsRef<str>,
+    FEATURE: AsRef<str>,
+    FEATURES: IntoIterator<Item = FEATURE>,
+{
+}
+
+/// Run a sequence of same binary crate (under the same sub dir) invocation(s), but each invocation
+/// with possibly different combinations of crate features.
+pub fn run_sequence_single_tasks<
+    SUBDIR,
+    FEATURE,
+    #[allow(non_camel_case_types)] FEATURE_SET,
+    #[allow(non_camel_case_types)] FEATURE_SETS,
+>(
+    parent_dir: &str,
+    sub_dir: SUBDIR,
+    feature_sets: FEATURE_SETS,
+) where
+    SUBDIR: AsRef<str>,
+    FEATURE: AsRef<str>,
+    FEATURE_SET: IntoIterator<Item = FEATURE>,
+    FEATURE_SETS: IntoIterator<Item = FEATURE_SET>,
+{
+}
+
+/// Run multiple sequences of batches in parallel.
+pub fn run_parallel_sequences_of_parallel_tasks<
+    SUBDIR,
+    FEATURE,
+    #[allow(non_camel_case_types)] FEATURE_SET,
+    #[allow(non_camel_case_types)] PARALLEL_TASKS,
+    SEQUENCE,
+    SEQUENCES,
+>(
+    parent_dir: &str,
+    sequences: SEQUENCES,
+) where
+    SUBDIR: AsRef<str>,
+    FEATURE: AsRef<str>,
+    FEATURE_SET: IntoIterator<Item = FEATURE>,
+    PARALLEL_TASKS: IntoIterator<Item = (SUBDIR, FEATURE_SET)>,
+    SEQUENCE: IntoIterator<Item = PARALLEL_TASKS>,
+    SEQUENCES: IntoIterator<Item = SEQUENCE>,
+{
+}
+
+fn run_sub_dirs<S>(parent_dir: &str, sub_dirs: impl IntoIterator<Item = S>) -> DynErrResult<()>
+where
+    S: AsRef<str>,
+{
     let mut children = Children::new();
     for sub_dir in sub_dirs {
         let child_or_err = spawn_main_under_subdir(parent_dir, sub_dir.as_ref());
@@ -160,14 +236,12 @@ fn run_subdirs<S: AsRef<str>>(
         match finished_result {
             Ok(Some((child_id, status))) => {
                 let child = children.remove(&child_id).unwrap();
-                // If we have both non-empty stdout and stderr, print stdout first and stderr
-                // second. That way the developer is more likely to notice (and there is less to
-                // scroll up).
                 let mut stdout = io::stdout().lock();
                 let mut stderr = io::stderr().lock();
 
-                //let mut child_out = child.stdout.unwrap();
-                //let mut child_err = child.stderr.unwrap();
+                // If we have both non-empty stdout and stderr, print stdout first and stderr
+                // second. That way the developer is more likely to notice (and there is less
+                // vertical distance to scroll up).
                 if let Some(mut child_out) = child.stdout {
                     copy_all_bytes(&mut stdout, &mut child_out)?;
                 }
@@ -201,5 +275,8 @@ fn run_subdirs<S: AsRef<str>>(
 
 #[test]
 pub fn run_all_mock_combinations() -> DynErrResult<()> {
-    run_subdirs("testbins", vec!["fs_mock_entry_mock", "fs_mock_entry_real"])
+    run_sub_dirs(
+        INTERMEDIARY_DIR,
+        vec!["fs_mock_entry_mock", "fs_mock_entry_real"],
+    )
 }
