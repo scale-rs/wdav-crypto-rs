@@ -62,13 +62,16 @@ fn spawn_main_under_subdir(
     }
 }
 
+/// NOT a (transparent) single item struct, because we don't use [u32] for anything else here.
+type ChildId = u32;
+
 /// NOT [std::collections::HashSet], because that doesn't allow mutable access to items (otherwise
 /// their equality and hash code could change, and HashSet's invariants wouldn't hold true anymore).
 ///
 /// Keys are results of [Child]'s `id()` method.
 ///
 /// We could use [Vec], but child get removed incrementally => O(n^2).
-type Children = HashMap<u32, Child>;
+type GroupOfChildren = HashMap<ChildId, Child>;
 
 /// Iterate over the given children max. once. Take the first finished child (if any), and return
 /// its process ID and exit status.
@@ -77,7 +80,7 @@ type Children = HashMap<u32, Child>;
 /// process.
 ///
 /// [Ok] of [Some] CAN contain [ExitStatus] _NOT_ being OK!
-fn finished_child(children: &mut Children) -> DynErrResult<Option<(u32, ExitStatus)>> {
+fn finished_child(children: &mut GroupOfChildren) -> DynErrResult<Option<(ChildId, ExitStatus)>> {
     for (child_id, child) in children.iter_mut() {
         let opt_status_or_err = child.try_wait();
 
@@ -142,89 +145,142 @@ fn copy_all_bytes(out: &mut impl Write, inp: &mut impl Read) -> IoResult<usize> 
     }
 }
 
-/// Indicate when to end an execution of parallel runs in the same batch, or a sequence of batches.
+/// Indicate when to end an execution of parallel tasks in the same group, or a sequence of groups.
 pub enum ExecutionEnd {
-    /// Stop the current batch on first failure. Kill any other parallel runs, without reporting any
-    /// output from them. Don't start any subsequent batch(es).
-    OnFirstFailure,
-    /// On failure of any runs that have already started, wait until all other parallel runs finish,
-    /// too. Report output from all of them. However, don't start any subsequent runs.
-    FinishBatch,
-    /// Run all batch(es) and all runs in each batch. Wait for all of them, even if any of them
-    /// fails.
-    FinishAll,
+    /// Stop any and all active tasks on first failure. Stop them without reporting any output from
+    /// them (except for the failed task). Don't start any subsequent task(s).
+    OnFailureStopAll,
+    /// On failure of any tasks that have already started, wait until all other parallel tasks
+    /// finish, too. Report output from all of them. Potentially reorder their outputs, so that
+    /// outputs of any failed task(s) will be at the end. Don't start any subsequent tasks.
+    OnFailureFinishActive,
+    /// Run all group(s) and all task(s) in each group. Wait for all of them, even if any of them
+    /// fail.
+    ProcessAll,
 }
 
-/// Run a batch of parallel binary crate invocations. Each item (a tuple) of the `batch` consists of
+/// Mode of handling task life cycle.
+pub enum TaskSpawning {
+    /// Default (until there is any error, or until we finish all tasks).
+    ProcessAll,
+    /// Finish active tasks, collect their output. Don't start any new ones.
+    FinishActive,
+    /// Stop any and all active tasks. Ignore their output (except for the task that we has failed
+    /// and that triggered this mode).
+    StopAll,
+}
+
+/// Run a group of parallel binary crate invocations. Each item (a tuple) of the group consists of
 /// two fields:
 /// - subdirectory, and
 /// - crate feature name(s), if any.
 ///
 /// All entries are run in parallel. It's an error if two or more entries have the same subdirectory
 /// name.
-pub fn run_parallel_single_tasks<SUBDIR, FEATURE, FEATURES>(
-    parent_dir: &str,
-    tasks: impl IntoIterator<Item = (SUBDIR, FEATURES)>,
+pub fn run_parallel_single_tasks<
+    #[allow(non_camel_case_types)] PARENT_DIR,
+    #[allow(non_camel_case_types)] SUB_DIR,
+    FEATURE,
+    FEATURES,
+    TASKS,
+>(
+    parent_dir: PARENT_DIR,
+    tasks: TASKS,
+    until: ExecutionEnd,
 ) where
-    SUBDIR: AsRef<str>,
+    PARENT_DIR: AsRef<str>,
+    SUB_DIR: AsRef<str>,
     FEATURE: AsRef<str>,
     FEATURES: IntoIterator<Item = FEATURE>,
+    TASKS: IntoIterator<Item = (SUB_DIR, FEATURES)>,
 {
 }
 
-/// Run a sequence of same binary crate (under the same sub dir) invocation(s), but each invocation
-/// with possibly different combinations of crate features.
+/// Run a sequence of the same binary crate (under the same sub dir) invocation(s), but each
+/// invocation with possibly different combinations of crate features.
+///
+/// The tasks are run in sequence, but their output may be reordered, to have any non-empty `stderr`
+/// at the end.
 pub fn run_sequence_single_tasks<
-    SUBDIR,
+    #[allow(non_camel_case_types)] PARENT_DIR,
+    #[allow(non_camel_case_types)] SUB_DIR,
     FEATURE,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] FEATURE_SETS,
 >(
-    parent_dir: &str,
-    sub_dir: SUBDIR,
+    parent_dir: PARENT_DIR,
+    sub_dir: SUB_DIR,
     feature_sets: FEATURE_SETS,
+    until: ExecutionEnd,
 ) where
-    SUBDIR: AsRef<str>,
+    PARENT_DIR: AsRef<str>,
+    SUB_DIR: AsRef<str>,
     FEATURE: AsRef<str>,
     FEATURE_SET: IntoIterator<Item = FEATURE>,
     FEATURE_SETS: IntoIterator<Item = FEATURE_SET>,
 {
 }
 
-/// Run multiple sequences of batches in parallel.
+/// Run multiple sequences, where each sequence step runs a group of task(s) in parallel.
+///
+/// Their output may be reordered, to have any non-empty `stderr` at the end.
 pub fn run_parallel_sequences_of_parallel_tasks<
-    SUBDIR,
+    #[allow(non_camel_case_types)] PARENT_DIR,
+    #[allow(non_camel_case_types)] SUB_DIR,
     FEATURE,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] PARALLEL_TASKS,
     SEQUENCE,
     SEQUENCES,
 >(
-    parent_dir: &str,
+    parent_dir: PARENT_DIR,
     sequences: SEQUENCES,
+    until: ExecutionEnd,
 ) where
-    SUBDIR: AsRef<str>,
+    PARENT_DIR: AsRef<str>,
+    SUB_DIR: AsRef<str>,
     FEATURE: AsRef<str>,
     FEATURE_SET: IntoIterator<Item = FEATURE>,
-    PARALLEL_TASKS: IntoIterator<Item = (SUBDIR, FEATURE_SET)>,
+    PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
     SEQUENCE: IntoIterator<Item = PARALLEL_TASKS>,
     SEQUENCES: IntoIterator<Item = SEQUENCE>,
 {
+}
+
+fn group_start<
+    #[allow(non_camel_case_types)] PARENT_DIR,
+    #[allow(non_camel_case_types)] SUB_DIR,
+    FEATURE,
+    #[allow(non_camel_case_types)] FEATURE_SET,
+    #[allow(non_camel_case_types)] PARALLEL_TASKS,
+>(
+    parent_dir: PARENT_DIR,
+    tasks: PARALLEL_TASKS,
+    until: ExecutionEnd,
+) -> (GroupOfChildren, TaskSpawning)
+where
+    PARENT_DIR: AsRef<str>,
+    SUB_DIR: AsRef<str>,
+    FEATURE: AsRef<str>,
+    FEATURE_SET: IntoIterator<Item = FEATURE>,
+    PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
+{
+    panic!()
 }
 
 fn run_sub_dirs<S>(parent_dir: &str, sub_dirs: impl IntoIterator<Item = S>) -> DynErrResult<()>
 where
     S: AsRef<str>,
 {
-    let mut children = Children::new();
+    let mut children = GroupOfChildren::new();
     for sub_dir in sub_dirs {
         let child_or_err = spawn_main_under_subdir(parent_dir, sub_dir.as_ref());
 
         match child_or_err {
             Ok(child) => children.insert(child.id(), child),
             Err(err) => {
-                for (mut _other_id, mut other_child) in children {
-                    let _ignored_result = other_child.kill();
+                for (_, mut other_child) in children {
+                    let _ = other_child.kill();
                 }
                 return Err(err);
             }
