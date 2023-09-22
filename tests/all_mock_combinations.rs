@@ -1,8 +1,9 @@
 #![feature(can_vector, read_buf, write_all_vectored)]
+//! Any `S` generic parameter is for [String]/[str] slice-like type, used for accepting names of
+//! directories, files/binary crates, features...
 
 use core::borrow::Borrow;
 use core::time::Duration;
-use http::header::IntoIter;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::{self, IoSlice, IoSliceMut, Read, Result as IoResult, Write};
@@ -22,16 +23,12 @@ const BUFFER_SIZE: usize = 16 * 4096;
 /// How long to sleep before checking again whether any child process(es) finished.
 const SLEEP_BETWEEN_CHECKING_CHILDREN: Duration = Duration::from_millis(50);
 
-fn manifest_path_for_subdir<
-    #[allow(non_camel_case_types)] PARENT_DIR,
-    #[allow(non_camel_case_types)] SUB_DIR,
->(
-    parent_dir: &PARENT_DIR,
-    sub_dir: &SUB_DIR,
+fn manifest_path_for_subdir<#[allow(non_camel_case_types)] S>(
+    parent_dir: &S,
+    sub_dir: &S,
 ) -> PathBuf
 where
-    PARENT_DIR: Borrow<str>,
-    SUB_DIR: Borrow<str>,
+    S: Borrow<str>,
 {
     PathBuf::from_iter([parent_dir.borrow(), sub_dir.borrow(), "Cargo.toml"])
 }
@@ -48,7 +45,7 @@ impl ExitStatusWrapped {
     }
 }
 
-pub enum BinaryCrateName<O: Borrow<str>> {
+pub enum BinaryCrateName<S: Borrow<str>> {
     /// The binary name is the same as `[package]` name in `Cargo.toml`. (That's the default binary
     /// crate, and its source code is (by default) in `src/main.rs`.)
     Main,
@@ -57,9 +54,9 @@ pub enum BinaryCrateName<O: Borrow<str>> {
     /// The binary (executable) name is (by
     /// [auto-discovery](https://doc.rust-lang.org/nightly/cargo/reference/cargo-targets.html#target-auto-discovery))
     /// same as its source file name (excluding `.rs`; add `.exe` on Windows).
-    Other(O),
+    Other(S),
 }
-impl<O: Borrow<str>> BinaryCrateName<O> {
+impl<S: Borrow<str>> BinaryCrateName<S> {
     fn borrow(&self) -> &str {
         match self {
             Self::Main => "main",
@@ -71,18 +68,14 @@ impl<O: Borrow<str>> BinaryCrateName<O> {
 type DynErr = Box<dyn Error>;
 type DynErrResult<T> = Result<T, DynErr>;
 
-fn spawn_main_under_subdir<
-    #[allow(non_camel_case_types)] PARENT_DIR,
-    #[allow(non_camel_case_types)] SUB_DIR,
->(
-    parent_dir: PARENT_DIR,
-    sub_dir: SUB_DIR,
-    // TODO:
-    /*, features: impl IntoIterator<Item = F>*/
+fn spawn_main_under_subdir<#[allow(non_camel_case_types)] S>(
+    parent_dir: S,
+    sub_dir: S,
+    binary_crate: BinaryCrateName<S>, // TODO:
+                                      /*, features: impl IntoIterator<Item = F>*/
 ) -> DynErrResult<Child>
 where
-    PARENT_DIR: Borrow<str>,
-    SUB_DIR: Borrow<str>,
+    S: Borrow<str>,
 {
     let manifest_path = manifest_path_for_subdir(&parent_dir, &sub_dir);
     // Even though the binary source is in `main.rs`, the executable will be called the same as its
@@ -218,22 +211,14 @@ pub enum SpawningMode {
 ///
 /// All entries are run in parallel. It's an error if two or more entries have the same subdirectory
 /// name.
-pub fn run_parallel_single_tasks<
-    #[allow(non_camel_case_types)] PARENT_DIR,
-    #[allow(non_camel_case_types)] SUB_DIR,
-    FEATURE,
-    FEATURES,
-    TASKS,
->(
-    parent_dir: PARENT_DIR,
+pub fn run_parallel_single_tasks<#[allow(non_camel_case_types)] S, FEATURES, TASKS>(
+    parent_dir: S,
     tasks: TASKS,
     until: ExecutionEnd,
 ) where
-    PARENT_DIR: Borrow<str>,
-    SUB_DIR: Borrow<str>,
-    FEATURE: Borrow<str>,
-    FEATURES: IntoIterator<Item = FEATURE>,
-    TASKS: IntoIterator<Item = (SUB_DIR, FEATURES)>,
+    S: Borrow<str>,
+    FEATURES: IntoIterator<Item = S>,
+    TASKS: IntoIterator<Item = (S /*binary crate name*/, FEATURES)>,
 {
 }
 
@@ -243,21 +228,17 @@ pub fn run_parallel_single_tasks<
 /// The tasks are run in sequence, but their output may be reordered, to have any non-empty `stderr`
 /// at the end.
 pub fn run_sequence_single_tasks<
-    #[allow(non_camel_case_types)] PARENT_DIR,
-    #[allow(non_camel_case_types)] SUB_DIR,
-    FEATURE,
+    #[allow(non_camel_case_types)] S,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] FEATURE_SETS,
 >(
-    parent_dir: PARENT_DIR,
-    sub_dir: SUB_DIR,
+    parent_dir: S,
+    sub_dir: S,
     feature_sets: FEATURE_SETS,
     until: ExecutionEnd,
 ) where
-    PARENT_DIR: Borrow<str>,
-    SUB_DIR: Borrow<str>,
-    FEATURE: Borrow<str>,
-    FEATURE_SET: IntoIterator<Item = FEATURE>,
+    S: Borrow<str>,
+    FEATURE_SET: IntoIterator<Item = S>,
     FEATURE_SETS: IntoIterator<Item = FEATURE_SET>,
 {
 }
@@ -266,45 +247,37 @@ pub fn run_sequence_single_tasks<
 ///
 /// Their output may be reordered, to have any non-empty `stderr` at the end.
 pub fn run_parallel_sequences_of_parallel_tasks<
-    #[allow(non_camel_case_types)] PARENT_DIR,
-    #[allow(non_camel_case_types)] SUB_DIR,
-    FEATURE,
+    #[allow(non_camel_case_types)] S,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] PARALLEL_TASKS,
     SEQUENCE,
     SEQUENCES,
 >(
-    parent_dir: PARENT_DIR,
+    parent_dir: S,
     sequences: SEQUENCES,
     until: ExecutionEnd,
 ) where
-    PARENT_DIR: Borrow<str>,
-    SUB_DIR: Borrow<str>,
-    FEATURE: Borrow<str>,
-    FEATURE_SET: IntoIterator<Item = FEATURE>,
-    PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
+    S: Borrow<str>,
+    FEATURE_SET: IntoIterator<Item = S /* feature*/>,
+    PARALLEL_TASKS: IntoIterator<Item = (S /* binary crate name*/, FEATURE_SET)>,
     SEQUENCE: IntoIterator<Item = PARALLEL_TASKS>,
     SEQUENCES: IntoIterator<Item = SEQUENCE>,
 {
 }
 
 fn group_start<
-    #[allow(non_camel_case_types)] PARENT_DIR,
-    #[allow(non_camel_case_types)] SUB_DIR,
-    FEATURE,
+    #[allow(non_camel_case_types)] S,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] PARALLEL_TASKS,
 >(
-    parent_dir: PARENT_DIR,
+    parent_dir: S,
     tasks: PARALLEL_TASKS,
     until: ExecutionEnd,
 ) -> (GroupOfChildren, SpawningMode)
 where
-    PARENT_DIR: Borrow<str>,
-    SUB_DIR: Borrow<str>,
-    FEATURE: Borrow<str>,
-    FEATURE_SET: IntoIterator<Item = FEATURE>,
-    PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
+    S: Borrow<str>,
+    FEATURE_SET: IntoIterator<Item = S /* feature */>,
+    PARALLEL_TASKS: IntoIterator<Item = (S /* binary crate name */, FEATURE_SET)>,
 {
     panic!()
 }
@@ -323,7 +296,8 @@ where
 {
     let mut children = GroupOfChildren::new();
     for sub_dir in sub_dirs {
-        let child_or_err = spawn_main_under_subdir(parent_dir, sub_dir.borrow());
+        let child_or_err =
+            spawn_main_under_subdir(parent_dir, sub_dir.borrow(), BinaryCrateName::Main);
 
         match child_or_err {
             Ok(child) => children.insert(child.id(), child),
