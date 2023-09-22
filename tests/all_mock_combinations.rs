@@ -22,8 +22,18 @@ const BUFFER_SIZE: usize = 16 * 4096;
 /// How long to sleep before checking again whether any child process(es) finished.
 const SLEEP_BETWEEN_CHECKING_CHILDREN: Duration = Duration::from_millis(50);
 
-fn manifest_path_for_subdir(parent_dir: &str, sub_dir: &str) -> PathBuf {
-    PathBuf::from_iter([parent_dir, sub_dir, "Cargo.toml"])
+fn manifest_path_for_subdir<
+    #[allow(non_camel_case_types)] PARENT_DIR,
+    #[allow(non_camel_case_types)] SUB_DIR,
+>(
+    parent_dir: PARENT_DIR,
+    sub_dir: SUB_DIR,
+) -> PathBuf
+where
+    PARENT_DIR: Borrow<str>,
+    SUB_DIR: Borrow<str>,
+{
+    PathBuf::from_iter([parent_dir.borrow(), sub_dir.borrow(), "Cargo.toml"])
 }
 
 #[repr(transparent)]
