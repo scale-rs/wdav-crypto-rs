@@ -1,5 +1,6 @@
 #![feature(can_vector, read_buf, write_all_vectored)]
 
+use core::borrow::Borrow;
 use core::time::Duration;
 use http::header::IntoIter;
 use std::collections::HashMap;
@@ -37,7 +38,21 @@ impl ExitStatusWrapped {
     }
 }
 
-type DynErrResult<T> = Result<T, Box<dyn Error>>;
+pub enum BinaryCrate<O: Borrow<str>> {
+    Main,
+    Other(O),
+}
+impl<O: Borrow<str>> BinaryCrate<O> {
+    fn borrow(&self) -> &str {
+        match self {
+            Self::Main => "main",
+            Self::Other(o) => o.borrow(),
+        }
+    }
+}
+
+type DynErr = Box<dyn Error>;
+type DynErrResult<T> = Result<T, DynErr>;
 
 fn spawn_main_under_subdir(
     parent_dir: &str,
@@ -164,10 +179,10 @@ pub enum TaskSpawning {
     /// Default (until there is any error, or until we finish all tasks).
     ProcessAll,
     /// Finish active tasks, collect their output. Don't start any new ones.
-    FinishActive,
-    /// Stop any and all active tasks. Ignore their output (except for the task that we has failed
-    /// and that triggered this mode).
-    StopAll,
+    FinishActive(Vec<DynErr>),
+    /// Stop any and all active tasks. Ignore their output (except for the task that has failed and
+    /// that triggered this mode).
+    StopAll(Vec<DynErr>),
 }
 
 /// Run a group of parallel binary crate invocations. Each item (a tuple) of the group consists of
@@ -188,9 +203,9 @@ pub fn run_parallel_single_tasks<
     tasks: TASKS,
     until: ExecutionEnd,
 ) where
-    PARENT_DIR: AsRef<str>,
-    SUB_DIR: AsRef<str>,
-    FEATURE: AsRef<str>,
+    PARENT_DIR: Borrow<str>,
+    SUB_DIR: Borrow<str>,
+    FEATURE: Borrow<str>,
     FEATURES: IntoIterator<Item = FEATURE>,
     TASKS: IntoIterator<Item = (SUB_DIR, FEATURES)>,
 {
@@ -213,9 +228,9 @@ pub fn run_sequence_single_tasks<
     feature_sets: FEATURE_SETS,
     until: ExecutionEnd,
 ) where
-    PARENT_DIR: AsRef<str>,
-    SUB_DIR: AsRef<str>,
-    FEATURE: AsRef<str>,
+    PARENT_DIR: Borrow<str>,
+    SUB_DIR: Borrow<str>,
+    FEATURE: Borrow<str>,
     FEATURE_SET: IntoIterator<Item = FEATURE>,
     FEATURE_SETS: IntoIterator<Item = FEATURE_SET>,
 {
@@ -237,9 +252,9 @@ pub fn run_parallel_sequences_of_parallel_tasks<
     sequences: SEQUENCES,
     until: ExecutionEnd,
 ) where
-    PARENT_DIR: AsRef<str>,
-    SUB_DIR: AsRef<str>,
-    FEATURE: AsRef<str>,
+    PARENT_DIR: Borrow<str>,
+    SUB_DIR: Borrow<str>,
+    FEATURE: Borrow<str>,
     FEATURE_SET: IntoIterator<Item = FEATURE>,
     PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
     SEQUENCE: IntoIterator<Item = PARALLEL_TASKS>,
@@ -259,9 +274,9 @@ fn group_start<
     until: ExecutionEnd,
 ) -> (GroupOfChildren, TaskSpawning)
 where
-    PARENT_DIR: AsRef<str>,
-    SUB_DIR: AsRef<str>,
-    FEATURE: AsRef<str>,
+    PARENT_DIR: Borrow<str>,
+    SUB_DIR: Borrow<str>,
+    FEATURE: Borrow<str>,
     FEATURE_SET: IntoIterator<Item = FEATURE>,
     PARALLEL_TASKS: IntoIterator<Item = (SUB_DIR, FEATURE_SET)>,
 {
@@ -270,11 +285,11 @@ where
 
 fn run_sub_dirs<S>(parent_dir: &str, sub_dirs: impl IntoIterator<Item = S>) -> DynErrResult<()>
 where
-    S: AsRef<str>,
+    S: Borrow<str>,
 {
     let mut children = GroupOfChildren::new();
     for sub_dir in sub_dirs {
-        let child_or_err = spawn_main_under_subdir(parent_dir, sub_dir.as_ref());
+        let child_or_err = spawn_main_under_subdir(parent_dir, sub_dir.borrow());
 
         match child_or_err {
             Ok(child) => children.insert(child.id(), child),
@@ -308,7 +323,7 @@ where
                 };
 
                 if status.success() && err_len == 0 {
-                    break Ok(());
+                    continue;
                 } else {
                     stderr.flush()?;
                     break Err(Box::new(ExitStatusWrapped::new(status)));
