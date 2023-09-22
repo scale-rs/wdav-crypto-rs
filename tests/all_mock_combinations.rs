@@ -26,8 +26,8 @@ fn manifest_path_for_subdir<
     #[allow(non_camel_case_types)] PARENT_DIR,
     #[allow(non_camel_case_types)] SUB_DIR,
 >(
-    parent_dir: PARENT_DIR,
-    sub_dir: SUB_DIR,
+    parent_dir: &PARENT_DIR,
+    sub_dir: &SUB_DIR,
 ) -> PathBuf
 where
     PARENT_DIR: Borrow<str>,
@@ -71,16 +71,23 @@ impl<O: Borrow<str>> BinaryCrateName<O> {
 type DynErr = Box<dyn Error>;
 type DynErrResult<T> = Result<T, DynErr>;
 
-fn spawn_main_under_subdir(
-    parent_dir: &str,
-    sub_dir: &str,
+fn spawn_main_under_subdir<
+    #[allow(non_camel_case_types)] PARENT_DIR,
+    #[allow(non_camel_case_types)] SUB_DIR,
+>(
+    parent_dir: PARENT_DIR,
+    sub_dir: SUB_DIR,
     // TODO:
     /*, features: impl IntoIterator<Item = F>*/
-) -> DynErrResult<Child> {
-    let manifest_path = manifest_path_for_subdir(parent_dir, sub_dir);
+) -> DynErrResult<Child>
+where
+    PARENT_DIR: Borrow<str>,
+    SUB_DIR: Borrow<str>,
+{
+    let manifest_path = manifest_path_for_subdir(&parent_dir, &sub_dir);
     // Even though the binary source is in `main.rs`, the executable will be called the same as its
     // crate (and as its project folder) - as given in `subdir`.
-    let mut binary = TestBinary::relative_to_parent(sub_dir, &manifest_path);
+    let mut binary = TestBinary::relative_to_parent(sub_dir.borrow(), &manifest_path);
     // @TODO if we don't paralellize the tested feature combinations fully, then apply
     // .with_feature(...) once per feature; re-build in the same folder (per the same
     // channel/sequence of run, but stop on the first error (or warning), unless configured
@@ -89,7 +96,7 @@ fn spawn_main_under_subdir(
         Ok(path) => {
             let mut command = Command::new(path);
             command.env("RUST_TEST_TIME_INTEGRATION", "3600000");
-            println!("Starting a process for {}.", sub_dir);
+            println!("Starting a process for {}.", sub_dir.borrow());
             return Ok(command.spawn()?);
         }
         Err(e) => Err(Box::new(e)),
