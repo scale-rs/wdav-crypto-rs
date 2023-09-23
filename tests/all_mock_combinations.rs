@@ -201,7 +201,7 @@ fn copy_all_bytes(out: &mut impl Write, inp: &mut impl Read) -> IoResult<usize> 
 }
 
 /// Indicate when to end an execution of parallel tasks in the same group, or a sequence of groups.
-pub enum ExecutionEnd {
+pub enum GroupEnd {
     /// Stop any and all active tasks on first failure. Stop them without reporting any output from
     /// them (except for the failed task). Don't start any subsequent task(s).
     OnFailureStopAll,
@@ -214,13 +214,45 @@ pub enum ExecutionEnd {
     ProcessAll,
 }
 
-impl ExecutionEnd {
-    pub fn after_errors(&self, errors: Vec<DynErr>) -> SpawningModeAndErrors {
-        panic!()
+impl GroupEnd {
+    fn mode_after_error_in_same_group(&self) -> SpawningMode {
+        match self {
+            Self::OnFailureStopAll => SpawningMode::StopAll,
+            Self::OnFailureFinishActive => SpawningMode::FinishActive,
+            Self::ProcessAll => SpawningMode::ProcessAll,
+        }
+    }
+    /// Return a new [SpawningModeAndOutputs] - after the first task (process) termination and/or
+    /// after an error.
+    pub fn same_group_after_output_and_or_error(
+        &self,
+        output: Option<Output>,
+        error: Option<DynErr>,
+    ) -> SpawningModeAndOutputs {
+        return if has_error(&output, &error) {
+            SpawningModeAndOutputs {
+                mode: self.mode_after_error_in_same_group(),
+                outputs: vec![(output, error)],
+            }
+        } else {
+            SpawningModeAndOutputs {
+                mode: SpawningMode::ProcessAll,
+                outputs: vec![(output, error)],
+            }
+        };
     }
 }
 
+pub enum SequenceEnd {
+    /// On success of this group continue the sequence (any successive groups in this sequence),
+    /// even if any other parallel sequence(s) have failed.
+    ContinueRegardlessOfOthers,
+    /// If any other sequence fails, stop this one, too. (Then follow this sequence's [GroupEnd].)
+    StopOnOthersFailure,
+}
+
 /// Mode of handling task life cycle.
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub enum SpawningMode {
     /// Default (until there is any error, or until we finish all tasks).
     ProcessAll,
@@ -231,26 +263,58 @@ pub enum SpawningMode {
     StopAll,
 }
 
-pub struct SpawningModeAndErrors {
-    pub mode: SpawningMode,
-    pub errors: Vec<DynErr>,
+impl SpawningMode {
+    pub fn has_error(&self) -> bool {
+        self != &Self::ProcessAll
+    }
 }
 
-impl SpawningModeAndErrors {
-    pub fn after_error(self, until: ExecutionEnd, err: DynErr) -> Self {
-        match (&self, &until) {
-            (
-                Self {
-                    mode: SpawningMode::ProcessAll,
-                    errors: _,
-                },
-                _,
-            ) => {
-                panic!()
+/// Collected stdout+stderr output (if any) and exit status.
+pub type Output = (ExitStatus, Child);
+pub type OutputOption = Option<Output>;
+pub type DynErrOption = Option<DynErr>;
+
+/// Collected output and/or error.
+pub type OutputAndOrError = (OutputOption, DynErrOption);
+
+/// Whether the given output and/or error [Option]s indicate an error. Instead of two parameters,
+/// this could accept one parameter [OutputAndOrError]. But then it would consume it, which upsets
+/// ergonomics.
+pub fn has_error(output: &OutputOption, error: &DynErrOption) -> bool {
+    error.is_some() || {
+        matches!(output, Some((status, child)) if !status.success() || child.stderr.is_some())
+    }
+}
+
+pub struct SpawningModeAndOutputs {
+    pub mode: SpawningMode,
+    pub outputs: Vec<OutputAndOrError>,
+}
+
+impl SpawningModeAndOutputs {
+    pub fn group_after_output_and_or_error(
+        mut self,
+        output: Option<Output>,
+        error: Option<DynErr>,
+        group_until: &GroupEnd,
+    ) -> Self {
+        let has_new_error = has_error(&output, &error);
+        self.outputs.push((output, error));
+
+        let mode = if self.mode.has_error() {
+            debug_assert_eq!(self.mode, group_until.mode_after_error_in_same_group());
+            self.mode
+        } else {
+            if has_new_error {
+                group_until.mode_after_error_in_same_group()
+            } else {
+                debug_assert_eq!(self.mode, SpawningMode::ProcessAll);
+                self.mode
             }
-            (_, _) => {
-                panic!()
-            }
+        };
+        Self {
+            mode,
+            outputs: self.outputs,
         }
     }
 }
@@ -265,7 +329,7 @@ impl SpawningModeAndErrors {
 pub fn run_parallel_single_tasks<'s, S, FEATURES, TASKS>(
     parent_dir: &S,
     tasks: TASKS,
-    until: ExecutionEnd,
+    group_until: GroupEnd,
 ) where
     S: Borrow<str> + 's + ?Sized,
     FEATURES: IntoIterator<Item = S>,
@@ -287,7 +351,7 @@ pub fn run_sequence_single_tasks<
     parent_dir: &S,
     sub_dir: &S,
     feature_sets: FEATURE_SETS,
-    until: ExecutionEnd,
+    group_until: GroupEnd,
 ) where
     S: Borrow<str> + 's + ?Sized,
     FEATURE_SET: IntoIterator<Item = &'s S>,
@@ -303,18 +367,17 @@ pub fn run_parallel_sequences_of_parallel_tasks<
     S,
     #[allow(non_camel_case_types)] FEATURE_SET,
     #[allow(non_camel_case_types)] PARALLEL_TASKS,
-    SEQUENCE,
+    SEQUENCE_TASKS,
     SEQUENCES,
 >(
     parent_dir: &S,
     sequences: SEQUENCES,
-    until: ExecutionEnd,
 ) where
     S: Borrow<str> + 's + ?Sized,
     FEATURE_SET: IntoIterator<Item = &'s S /* feature*/>,
     PARALLEL_TASKS: IntoIterator<Item = (&'s S /* binary crate name*/, FEATURE_SET)>,
-    SEQUENCE: IntoIterator<Item = PARALLEL_TASKS>,
-    SEQUENCES: IntoIterator<Item = SEQUENCE>,
+    SEQUENCE_TASKS: IntoIterator<Item = PARALLEL_TASKS>,
+    SEQUENCES: IntoIterator<Item = (GroupEnd, SequenceEnd, SEQUENCE_TASKS)>,
 {
 }
 
@@ -338,8 +401,8 @@ fn group_start<
 >(
     parent_dir: &S,
     tasks: PARALLEL_TASKS,
-    until: ExecutionEnd,
-) -> DynErrResult<(GroupOfChildren, SpawningModeAndErrors)>
+    until: GroupEnd,
+) -> DynErrResult<(GroupOfChildren, SpawningModeAndOutputs)>
 where
     S: Borrow<str> + 's + ?Sized,
     B: 'b + ?Sized,
@@ -372,9 +435,9 @@ where
 
 fn group_life_cycle_step(
     group: GroupOfChildren,
-    mode: SpawningModeAndErrors,
-    until: ExecutionEnd,
-) -> (GroupOfChildren, SpawningModeAndErrors) {
+    mode: SpawningModeAndOutputs,
+    until: GroupEnd,
+) -> (GroupOfChildren, SpawningModeAndOutputs) {
     panic!()
 }
 
